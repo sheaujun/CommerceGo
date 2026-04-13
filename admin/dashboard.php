@@ -85,15 +85,15 @@ $topProducts = [
                 <span class="nav-icon">💊</span>
                 <span class="nav-label">Products</span>
             </a>
-            <a href="#" class="nav-item">
+            <a href="approvals.php" class="nav-item">
                 <span class="nav-icon">✅</span>
                 <span class="nav-label">Approvals</span>
             </a>
-            <a href="#" class="nav-item">
+            <a href="customers.php" class="nav-item">
                 <span class="nav-icon">🧾</span>
                 <span class="nav-label">Customers</span>
             </a>
-            <a href="#" class="nav-item">
+            <a href="orders.php" class="nav-item">
                 <span class="nav-icon">🛒</span>
                 <span class="nav-label">Orders</span>
             </a>
