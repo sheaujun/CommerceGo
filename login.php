@@ -16,8 +16,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if (empty($errors)) {
-        $stmt = $conn->prepare('SELECT userID, userName, email, password, role FROM users WHERE email = ? OR userName = ? LIMIT 1');
-        $stmt->bind_param('ss', $emailOrUser, $emailOrUser);
+        $stmt = $conn->prepare('SELECT userID, userName, email, password, role FROM users WHERE userID = ? OR email = ? OR userName = ? LIMIT 1');
+        $stmt->bind_param('sss', $emailOrUser, $emailOrUser, $emailOrUser);
         $stmt->execute();
         $result = $stmt->get_result();
 
@@ -30,6 +30,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 if ($row['role'] === 'admin') {
                     header('Location: admin/dashboard.php');
+                } elseif ($row['role'] === 'staff') {
+                    header('Location: staff/index.php');
                 } else {
                     header('Location: dashboard.php');
                 }
@@ -106,13 +108,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             </div>
 
             <div class="field-group">
-                <label for="email_or_username" class="field-label">Email Address</label>
+                <label for="email_or_username" class="field-label">Email Address or User ID</label>
                 <input
                     type="text"
                     id="email_or_username"
                     name="email_or_username"
                     class="field-input"
-                    placeholder="you@example.com"
+                    placeholder="you@example.com or 123"
                     value="<?php echo isset($emailOrUser) ? htmlspecialchars($emailOrUser) : ''; ?>"
                     required
                 >

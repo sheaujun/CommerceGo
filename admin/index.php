@@ -53,7 +53,7 @@ $topProducts = [
     <meta charset="UTF-8">
     <title>Essen Pharmacy - Admin Dashboard</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="stylesheet" href="css/admin-dashboard.css">
+    <link rel="stylesheet" href="../css/admin-dashboard.css">
 </head>
 <body>
 <div class="admin-layout">
@@ -69,19 +69,19 @@ $topProducts = [
         </div>
 
         <nav class="sidebar-nav">
-            <a href="dashboard.php" class="nav-item active">
+            <a href="#" class="nav-item active">
                 <span class="nav-icon">🏠</span>
                 <span class="nav-label">Dashboard</span>
             </a>
-            <a href="analytics.php" class="nav-item">
+            <a href="profile.php" class="nav-item">
                 <span class="nav-icon">📊</span>
                 <span class="nav-label">Analytics</span>
             </a>
-            <a href="staff.php" class="nav-item">
+            <a href="profile.php" class="nav-item">
                 <span class="nav-icon">👥</span>
                 <span class="nav-label">Staff Management</span>
             </a>
-            <a href="products.php" class="nav-item">
+            <a href="profile.php" class="nav-item">
                 <span class="nav-icon">💊</span>
                 <span class="nav-label">Products</span>
             </a>
