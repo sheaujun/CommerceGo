@@ -22,6 +22,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_p
     $compliance  = $_POST['compliance'] ?? 'Pending';
     $expiryDate  = $_POST['expiry_date'] ?? null;
 
+    if (isset($_FILES['image_file']) && $_FILES['image_file']['error'] !== UPLOAD_ERR_NO_FILE) {
+        if ($_FILES['image_file']['error'] !== UPLOAD_ERR_OK) {
+            $errors[] = 'Failed to upload image. Please try again.';
+        } else {
+            $allowedTypes = [
+                'image/jpeg' => 'jpg',
+                'image/png' => 'png',
+                'image/gif' => 'gif',
+            ];
+            $fileType = mime_content_type($_FILES['image_file']['tmp_name']);
+            if (!isset($allowedTypes[$fileType])) {
+                $errors[] = 'Only JPG, PNG, and GIF images are allowed.';
+            } else {
+                $uploadDir = __DIR__ . '/uploads/products';
+                if (!is_dir($uploadDir) && !mkdir($uploadDir, 0755, true)) {
+                    $errors[] = 'Unable to create upload folder.';
+                } else {
+                    $extension = $allowedTypes[$fileType];
+                    $fileName = 'product_' . time() . '_' . bin2hex(random_bytes(5)) . '.' . $extension;
+                    $destination = $uploadDir . '/' . $fileName;
+                    if (move_uploaded_file($_FILES['image_file']['tmp_name'], $destination)) {
+                        $imagePath = 'uploads/products/' . $fileName;
+                    } else {
+                        $errors[] = 'Unable to save uploaded image.';
+                    }
+                }
+            }
+        }
+    }
+
     if ($name === '') {
         $errors[] = 'Product name is required.';
     }
@@ -74,6 +104,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'edit_
     $status      = $_POST['edit_status'] === 'Inactive' ? 'Inactive' : 'Active';
     $compliance  = $_POST['edit_compliance'] ?? 'Pending';
     $expiryDate  = $_POST['edit_expiry_date'] ?? null;
+
+    if (isset($_FILES['edit_image_file']) && $_FILES['edit_image_file']['error'] !== UPLOAD_ERR_NO_FILE) {
+        if ($_FILES['edit_image_file']['error'] !== UPLOAD_ERR_OK) {
+            $errors[] = 'Failed to upload image. Please try again.';
+        } else {
+            $allowedTypes = [
+                'image/jpeg' => 'jpg',
+                'image/png' => 'png',
+                'image/gif' => 'gif',
+            ];
+            $fileType = mime_content_type($_FILES['edit_image_file']['tmp_name']);
+            if (!isset($allowedTypes[$fileType])) {
+                $errors[] = 'Only JPG, PNG, and GIF images are allowed.';
+            } else {
+                $uploadDir = __DIR__ . '/uploads/products';
+                if (!is_dir($uploadDir) && !mkdir($uploadDir, 0755, true)) {
+                    $errors[] = 'Unable to create upload folder.';
+                } else {
+                    $extension = $allowedTypes[$fileType];
+                    $fileName = 'product_' . time() . '_' . bin2hex(random_bytes(5)) . '.' . $extension;
+                    $destination = $uploadDir . '/' . $fileName;
+                    if (move_uploaded_file($_FILES['edit_image_file']['tmp_name'], $destination)) {
+                        $imagePath = 'uploads/products/' . $fileName;
+                    } else {
+                        $errors[] = 'Unable to save uploaded image.';
+                    }
+                }
+            }
+        }
+    }
 
     if ($productId <= 0) {
         $errors[] = 'Invalid product selected.';
@@ -219,23 +279,23 @@ $categories = $catResult ? $catResult->fetch_all(MYSQLI_ASSOC) : [];
                 <span class="nav-icon">💊</span>
                 <span class="nav-label">Products</span>
             </a>
-            <a href="#" class="nav-item">
+            <a href="approvals.php" class="nav-item">
                 <span class="nav-icon">✅</span>
                 <span class="nav-label">Approvals</span>
             </a>
-            <a href="#" class="nav-item">
+            <a href="customers.php" class="nav-item">
                 <span class="nav-icon">🧾</span>
                 <span class="nav-label">Customers</span>
             </a>
-            <a href="#" class="nav-item">
+            <a href="orders.php" class="nav-item">
                 <span class="nav-icon">🛒</span>
                 <span class="nav-label">Orders</span>
             </a>
-            <a href="#" class="nav-item">
+            <a href="support-chat.php" class="nav-item">
                 <span class="nav-icon">💬</span>
                 <span class="nav-label">Support Chat</span>
             </a>
-            <a href="#" class="nav-item">
+            <a href="profile.php" class="nav-item">
                 <span class="nav-icon">👤</span>
                 <span class="nav-label">Profile</span>
             </a>
@@ -411,12 +471,18 @@ $categories = $catResult ? $catResult->fetch_all(MYSQLI_ASSOC) : [];
             <button type="button" class="product-modal-close" id="closeAddProduct">×</button>
         </div>
         <div class="product-modal-body">
-            <form method="post" action="products.php">
+            <form method="post" action="products.php" enctype="multipart/form-data">
                 <input type="hidden" name="action" value="add_product">
 
                 <div class="product-modal-field">
-                    <label class="product-modal-label" for="image_path">Product Image URL</label>
-                    <input type="text" id="image_path" name="image_path" class="product-modal-input">
+                    <label class="product-modal-label" for="image_file">Product Image</label>
+                    <input type="file" id="image_file" name="image_file" accept="image/jpeg,image/png,image/gif" class="product-modal-input">
+                    <label class="product-modal-label" for="image_path">or Image URL (optional)</label>
+                    <input type="text" id="image_path" name="image_path" class="product-modal-input" placeholder="https://example.com/image.jpg">
+                    <div class="product-image-preview-container">
+                        <img id="image_path_preview" class="product-image-preview" src="" alt="Product image preview">
+                        <span id="image_path_preview_placeholder" class="product-image-preview-placeholder">Upload an image file or enter a valid image URL to preview.</span>
+                    </div>
                 </div>
 
                 <div class="product-modal-field">
@@ -491,13 +557,19 @@ $categories = $catResult ? $catResult->fetch_all(MYSQLI_ASSOC) : [];
             <button type="button" class="product-modal-close" id="closeEditProduct">×</button>
         </div>
         <div class="product-modal-body">
-            <form method="post" action="products.php">
+            <form method="post" action="products.php" enctype="multipart/form-data">
                 <input type="hidden" name="action" value="edit_product">
                 <input type="hidden" name="product_id" id="edit_product_id">
 
                 <div class="product-modal-field">
-                    <label class="product-modal-label" for="edit_image_path">Product Image URL</label>
-                    <input type="text" id="edit_image_path" name="edit_image_path" class="product-modal-input">
+                    <label class="product-modal-label" for="edit_image_file">Product Image</label>
+                    <input type="file" id="edit_image_file" name="edit_image_file" accept="image/jpeg,image/png,image/gif" class="product-modal-input">
+                    <label class="product-modal-label" for="edit_image_path">or Image URL</label>
+                    <input type="text" id="edit_image_path" name="edit_image_path" class="product-modal-input" placeholder="https://example.com/image.jpg">
+                    <div class="product-image-preview-container">
+                        <img id="edit_image_path_preview" class="product-image-preview" src="" alt="Product image preview">
+                        <span id="edit_image_path_preview_placeholder" class="product-image-preview-placeholder">Upload an image file or enter a valid image URL to preview.</span>
+                    </div>
                 </div>
 
                 <div class="product-modal-field">
@@ -569,9 +641,90 @@ $categories = $catResult ? $catResult->fetch_all(MYSQLI_ASSOC) : [];
     const closeAddProductBtn = document.getElementById('closeAddProduct');
     const cancelAddProductBtn = document.getElementById('cancelAddProduct');
     const addProductModal = document.getElementById('addProductModal');
+    const imageFileInput = document.getElementById('image_file');
+    const imagePathInput = document.getElementById('image_path');
+    const imagePathPreview = document.getElementById('image_path_preview');
+    const imagePathPreviewPlaceholder = document.getElementById('image_path_preview_placeholder');
+    const editImageFileInput = document.getElementById('edit_image_file');
+    const editImagePath = document.getElementById('edit_image_path');
+    const editImagePathPreview = document.getElementById('edit_image_path_preview');
+    const editImagePathPreviewPlaceholder = document.getElementById('edit_image_path_preview_placeholder');
+    let currentPreviewUrl = null;
+
+    function setPreviewImageFromSource(fileInput, urlInput, imageEl, placeholderEl) {
+        if (fileInput && fileInput.files && fileInput.files[0]) {
+            if (currentPreviewUrl) {
+                URL.revokeObjectURL(currentPreviewUrl);
+            }
+            const file = fileInput.files[0];
+            currentPreviewUrl = URL.createObjectURL(file);
+            imageEl.src = currentPreviewUrl;
+            placeholderEl.style.display = 'none';
+            imageEl.style.display = 'block';
+            return;
+        }
+
+        const url = urlInput.value.trim();
+        if (!url) {
+            imageEl.src = '';
+            imageEl.style.display = 'none';
+            placeholderEl.textContent = 'Upload an image file or enter a valid image URL to preview.';
+            placeholderEl.style.display = 'block';
+            return;
+        }
+
+        imageEl.src = url;
+        placeholderEl.style.display = 'none';
+        imageEl.style.display = 'block';
+    }
+
+    if (imagePathInput) {
+        imagePathInput.addEventListener('input', function () {
+            setPreviewImageFromSource(imageFileInput, imagePathInput, imagePathPreview, imagePathPreviewPlaceholder);
+        });
+    }
+
+    if (imageFileInput) {
+        imageFileInput.addEventListener('change', function () {
+            setPreviewImageFromSource(imageFileInput, imagePathInput, imagePathPreview, imagePathPreviewPlaceholder);
+        });
+    }
+
+    if (editImagePath) {
+        editImagePath.addEventListener('input', function () {
+            setPreviewImageFromSource(editImageFileInput, editImagePath, editImagePathPreview, editImagePathPreviewPlaceholder);
+        });
+    }
+
+    if (editImageFileInput) {
+        editImageFileInput.addEventListener('change', function () {
+            setPreviewImageFromSource(editImageFileInput, editImagePath, editImagePathPreview, editImagePathPreviewPlaceholder);
+        });
+    }
+
+    if (imagePathPreview) {
+        imagePathPreview.addEventListener('error', function () {
+            this.style.display = 'none';
+            imagePathPreviewPlaceholder.textContent = 'Unable to preview image. Please check the file or URL.';
+            imagePathPreviewPlaceholder.style.display = 'block';
+        });
+    }
+
+    if (editImagePathPreview) {
+        editImagePathPreview.addEventListener('error', function () {
+            this.style.display = 'none';
+            editImagePathPreviewPlaceholder.textContent = 'Unable to preview image. Please check the file or URL.';
+            editImagePathPreviewPlaceholder.style.display = 'block';
+        });
+    }
 
     function openAddProductModal() {
-        if (addProductModal) addProductModal.classList.add('show');
+        if (addProductModal) {
+            if (imageFileInput) imageFileInput.value = '';
+            if (imagePathInput) imagePathInput.value = '';
+            setPreviewImageFromSource(imageFileInput, imagePathInput, imagePathPreview, imagePathPreviewPlaceholder);
+            addProductModal.classList.add('show');
+        }
     }
     function closeAddProductModal() {
         if (addProductModal) addProductModal.classList.remove('show');
@@ -591,7 +744,6 @@ $categories = $catResult ? $catResult->fetch_all(MYSQLI_ASSOC) : [];
     const closeEditProductBtn = document.getElementById('closeEditProduct');
     const cancelEditProductBtn = document.getElementById('cancelEditProduct');
     const editProductId = document.getElementById('edit_product_id');
-    const editImagePath = document.getElementById('edit_image_path');
     const editProductName = document.getElementById('edit_product_name');
     const editDescription = document.getElementById('edit_description');
     const editCategory = document.getElementById('edit_category');
@@ -631,6 +783,9 @@ $categories = $catResult ? $catResult->fetch_all(MYSQLI_ASSOC) : [];
 
             editProductId.value = container.getAttribute('data-product-id') || '';
             editImagePath.value = container.getAttribute('data-image') || '';
+            if (editImageFileInput) {
+                editImageFileInput.value = '';
+            }
             editProductName.value = container.getAttribute('data-name') || '';
             editDescription.value = container.getAttribute('data-desc') || '';
             editCategory.value = container.getAttribute('data-category') || 'Medication';
@@ -639,6 +794,7 @@ $categories = $catResult ? $catResult->fetch_all(MYSQLI_ASSOC) : [];
             editExpiryDate.value = container.getAttribute('data-expiry') || '';
             editStatus.value = container.getAttribute('data-status') || 'Active';
             editCompliance.value = container.getAttribute('data-compliance') || 'Approved';
+            setPreviewImageFromSource(editImageFileInput, editImagePath, editImagePathPreview, editImagePathPreviewPlaceholder);
 
             openEditProductModal();
         });

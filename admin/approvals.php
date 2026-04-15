@@ -132,10 +132,11 @@ if ($categoryF !== '' && $categoryF !== 'All') {
     $types .= 's';
 }
 
-$sql = "SELECT submissionID, userID, productName, productDescription, category, price, stockQuantity, imagePath, expiryDate, status, rejectionReason, created_at
-        FROM product_submissions
+$sql = "SELECT ps.submissionID, ps.userID, ps.productName, ps.productDescription, ps.category, ps.price, ps.stockQuantity, ps.imagePath, ps.expiryDate, ps.status, ps.rejectionReason, ps.created_at, u.firstName, u.lastName
+        FROM product_submissions ps
+        LEFT JOIN users u ON ps.userID = u.userID
         WHERE $where
-        ORDER BY created_at DESC";
+        ORDER BY ps.created_at DESC";
 
 $stmt = $conn->prepare($sql);
 if (!empty($params)) {
@@ -318,10 +319,22 @@ $countStmt->close();
         <?php else: ?>
             <div class="approval-list">
                 <?php foreach ($submissions as $submission): ?>
+                    <?php
+                        $submittedByName = trim((($submission['firstName'] ?? '') . ' ' . ($submission['lastName'] ?? '')));
+                        $submittedByText = $submittedByName ? $submittedByName . ' (ID ' . (int)$submission['userID'] . ')' : 'User ID ' . (int)$submission['userID'];
+                        $displayCategory = trim((string)($submission['category'] ?? ''));
+                        if ($displayCategory === '' || $displayCategory === '0') {
+                            $displayCategory = 'Unknown';
+                        }
+                    ?>
                     <div class="approval-card">
                         <div class="approval-card-top">
                             <div class="approval-card-media">
-                                <span class="approval-card-icon">📦</span>
+                                <?php if (!empty($submission['imagePath'])): ?>
+                                    <img src="<?php echo htmlspecialchars($submission['imagePath']); ?>" alt="<?php echo htmlspecialchars($submission['productName']); ?>" class="approval-card-image">
+                                <?php else: ?>
+                                    <span class="approval-card-icon">📦</span>
+                                <?php endif; ?>
                             </div>
                             <div class="approval-card-info">
                                 <div class="approval-card-title-row">
@@ -329,7 +342,7 @@ $countStmt->close();
                                         <h2><?php echo htmlspecialchars($submission['productName']); ?></h2>
                                         <p><?php echo htmlspecialchars($submission['productDescription']); ?></p>
                                     </div>
-                                    <span class="badge-category"><?php echo htmlspecialchars($submission['category']); ?></span>
+                                    <span class="badge-category"><?php echo htmlspecialchars($displayCategory); ?></span>
                                 </div>
                                 <div class="approval-card-meta">
                                     <span>$<?php echo number_format($submission['price'], 2); ?></span>
@@ -343,18 +356,34 @@ $countStmt->close();
                         <details class="approval-details">
                             <summary>View details</summary>
                             <div class="approval-details-body">
-                                <div>
-                                    <strong>Category</strong>
-                                    <p><?php echo htmlspecialchars($submission['category']); ?></p>
-                                </div>
-                                <div>
-                                    <strong>Submitted By</strong>
-                                    <p>User ID <?php echo (int)$submission['userID']; ?></p>
-                                </div>
-                                <?php if ($submission['rejectionReason']): ?>
+                                <div class="approval-details-grid">
                                     <div>
-                                        <strong>Rejection Reason</strong>
-                                        <p><?php echo htmlspecialchars($submission['rejectionReason']); ?></p>
+                                        <strong>Category</strong>
+                                        <p><?php echo htmlspecialchars($displayCategory); ?></p>
+                                    </div>
+                                    <div>
+                                        <strong>Submitted By</strong>
+                                        <p><?php echo htmlspecialchars($submittedByText); ?></p>
+                                    </div>
+                                    <div>
+                                        <strong>Description</strong>
+                                        <p><?php echo htmlspecialchars($submission['productDescription']); ?></p>
+                                    </div>
+                                    <div>
+                                        <strong>Expiry Date</strong>
+                                        <p><?php echo htmlspecialchars(formatDate($submission['expiryDate'])); ?></p>
+                                    </div>
+                                    <?php if ($submission['rejectionReason']): ?>
+                                        <div class="approval-rejection-reason">
+                                            <strong>Rejection Reason</strong>
+                                            <p><?php echo htmlspecialchars($submission['rejectionReason']); ?></p>
+                                        </div>
+                                    <?php endif; ?>
+                                </div>
+
+                                <?php if (!empty($submission['imagePath'])): ?>
+                                    <div class="approval-details-image-wrap">
+                                        <img src="<?php echo htmlspecialchars($submission['imagePath']); ?>" alt="<?php echo htmlspecialchars($submission['productName']); ?>" class="approval-details-image">
                                     </div>
                                 <?php endif; ?>
                             </div>

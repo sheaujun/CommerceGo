@@ -170,6 +170,15 @@
     display: grid;
     place-items: center;
     flex-shrink: 0;
+    overflow: hidden;
+    border: 1px solid #dde4ed;
+}
+
+.approval-card-media img.approval-card-image {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
 }
 
 .approval-card-icon {
@@ -255,7 +264,34 @@
 .approval-details-body {
     margin-top: 12px;
     display: grid;
-    gap: 12px;
+    gap: 18px;
+}
+
+.approval-details-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 18px;
+}
+
+.approval-rejection-reason {
+    grid-column: 1 / -1;
+}
+
+.approval-details-image-wrap {
+    border-radius: 18px;
+    overflow: hidden;
+    background-color: #f8fafc;
+    max-height: 280px;
+    width: 100%;
+    max-width: 420px;
+    margin: 0 auto;
+}
+
+.approval-details-image-wrap img.approval-details-image {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
 }
 
 .approval-details-body strong {
