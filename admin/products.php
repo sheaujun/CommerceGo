@@ -18,6 +18,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_p
     $category    = trim($_POST['category'] ?? '');
     $price       = (float)($_POST['price'] ?? 0);
     $stock       = (int)($_POST['stock'] ?? 0);
+    $productType = $_POST['product_type'] ?? 'Both';
     $status      = $_POST['status'] === 'Inactive' ? 'Inactive' : 'Active';
     $compliance  = $_POST['compliance'] ?? 'Pending';
     $expiryDate  = $_POST['expiry_date'] ?? null;
@@ -67,16 +68,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_p
 
     if (empty($errors)) {
         $stmt = $conn->prepare(
-            'INSERT INTO products (productName, productDescription, category, price, stockQuantity, complianceStatus, status, imagePath, expiryDate)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            'INSERT INTO products (productName, productDescription, category, price, stockQuantity, physicalStock, onlineStock, productType, complianceStatus, status, imagePath, expiryDate)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $stmt->bind_param(
-            'sssisssss',
+            'sssiiiiissss',
             $name,
             $description,
             $category,
             $price,
             $stock,
+            $stock,
+            $stock,
+            $productType,
             $compliance,
             $status,
             $imagePath,
@@ -101,6 +105,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'edit_
     $category    = trim($_POST['edit_category'] ?? '');
     $price       = (float)($_POST['edit_price'] ?? 0);
     $stock       = (int)($_POST['edit_stock'] ?? 0);
+    $productType = $_POST['edit_product_type'] ?? 'Both';
     $status      = $_POST['edit_status'] === 'Inactive' ? 'Inactive' : 'Active';
     $compliance  = $_POST['edit_compliance'] ?? 'Pending';
     $expiryDate  = $_POST['edit_expiry_date'] ?? null;
@@ -156,16 +161,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'edit_
         $stmt = $conn->prepare(
             'UPDATE products
              SET productName = ?, productDescription = ?, category = ?, price = ?, stockQuantity = ?,
+                 physicalStock = ?, onlineStock = ?, productType = ?,
                  complianceStatus = ?, status = ?, imagePath = ?, expiryDate = ?
              WHERE productID = ?'
         );
         $stmt->bind_param(
-            'sssisssssi',
+            'sssiiiiissssi',
             $name,
             $description,
             $category,
             $price,
             $stock,
+            $stock,
+            $stock,
+            $productType,
             $compliance,
             $status,
             $imagePath,
@@ -220,7 +229,7 @@ if ($categoryF !== '' && $categoryF !== 'All') {
     $types .= 's';
 }
 
-$sql = "SELECT productID, productName, productDescription, category, price, stockQuantity,
+$sql = "SELECT productID, productName, productDescription, category, price, stockQuantity, productType,
                complianceStatus, status, imagePath, expiryDate
         FROM products
         WHERE $where
@@ -247,12 +256,25 @@ $categories = $catResult ? $catResult->fetch_all(MYSQLI_ASSOC) : [];
     <title>Essen Pharmacy - Product Management</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="css/admin-dashboard.css">
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const sidebarToggle = document.getElementById('sidebarToggle');
+            const adminLayout = document.querySelector('.admin-layout');
+            if (!sidebarToggle || !adminLayout) return;
+
+            sidebarToggle.addEventListener('click', function () {
+                const collapsed = adminLayout.classList.toggle('collapsed');
+                sidebarToggle.setAttribute('aria-pressed', collapsed.toString());
+            });
+        });
+    </script>
     <link rel="stylesheet" href="css/admin-products.css">
 </head>
 <body>
 <div class="admin-layout">
     <aside class="sidebar">
         <div class="sidebar-header">
+            <button type="button" id="sidebarToggle" class="sidebar-toggle" aria-pressed="false" aria-label="Toggle sidebar">☰</button>
             <div class="logo-circle">
                 <span class="logo-icon">⧉</span>
             </div>
@@ -441,6 +463,7 @@ $categories = $catResult ? $catResult->fetch_all(MYSQLI_ASSOC) : [];
                                      data-category="<?php echo htmlspecialchars($p['category']); ?>"
                                      data-price="<?php echo htmlspecialchars($p['price']); ?>"
                                      data-stock="<?php echo htmlspecialchars($p['stockQuantity']); ?>"
+                                     data-product-type="<?php echo htmlspecialchars($p['productType'] ?? 'Both'); ?>"
                                      data-status="<?php echo htmlspecialchars($p['status']); ?>"
                                      data-compliance="<?php echo htmlspecialchars($p['complianceStatus']); ?>"
                                      data-expiry="<?php echo htmlspecialchars($p['expiryDate'] ?? ''); ?>">
@@ -520,6 +543,17 @@ $categories = $catResult ? $catResult->fetch_all(MYSQLI_ASSOC) : [];
                     <div class="product-modal-field">
                         <label class="product-modal-label" for="expiry_date">Expiry Date</label>
                         <input type="date" id="expiry_date" name="expiry_date" class="product-modal-input">
+                    </div>
+                </div>
+
+                <div class="product-modal-grid">
+                    <div class="product-modal-field">
+                        <label class="product-modal-label" for="product_type">Product Type</label>
+                        <select id="product_type" name="product_type" class="product-modal-select">
+                            <option value="Physical">Physical</option>
+                            <option value="Online">Online</option>
+                            <option value="Both" selected>Both</option>
+                        </select>
                     </div>
                 </div>
 
@@ -606,6 +640,17 @@ $categories = $catResult ? $catResult->fetch_all(MYSQLI_ASSOC) : [];
                     <div class="product-modal-field">
                         <label class="product-modal-label" for="edit_expiry_date">Expiry Date</label>
                         <input type="date" id="edit_expiry_date" name="edit_expiry_date" class="product-modal-input">
+                    </div>
+                </div>
+
+                <div class="product-modal-grid">
+                    <div class="product-modal-field">
+                        <label class="product-modal-label" for="edit_product_type">Product Type</label>
+                        <select id="edit_product_type" name="edit_product_type" class="product-modal-select">
+                            <option value="Physical">Physical</option>
+                            <option value="Online">Online</option>
+                            <option value="Both">Both</option>
+                        </select>
                     </div>
                 </div>
 
@@ -750,6 +795,7 @@ $categories = $catResult ? $catResult->fetch_all(MYSQLI_ASSOC) : [];
     const editPrice = document.getElementById('edit_price');
     const editStock = document.getElementById('edit_stock');
     const editExpiryDate = document.getElementById('edit_expiry_date');
+    const editProductType = document.getElementById('edit_product_type');
     const editStatus = document.getElementById('edit_status');
     const editCompliance = document.getElementById('edit_compliance');
 
@@ -791,6 +837,7 @@ $categories = $catResult ? $catResult->fetch_all(MYSQLI_ASSOC) : [];
             editCategory.value = container.getAttribute('data-category') || 'Medication';
             editPrice.value = container.getAttribute('data-price') || '0';
             editStock.value = container.getAttribute('data-stock') || '0';
+            editProductType.value = container.getAttribute('data-product-type') || 'Both';
             editExpiryDate.value = container.getAttribute('data-expiry') || '';
             editStatus.value = container.getAttribute('data-status') || 'Active';
             editCompliance.value = container.getAttribute('data-compliance') || 'Approved';

@@ -144,12 +144,25 @@ $avgOrderValue = $totalOrders > 0 ? $totalSales / $totalOrders : 0;
     <title>Essen Pharmacy - Analytics</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="css/admin-dashboard.css">
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const sidebarToggle = document.getElementById('sidebarToggle');
+            const adminLayout = document.querySelector('.admin-layout');
+            if (!sidebarToggle || !adminLayout) return;
+
+            sidebarToggle.addEventListener('click', function () {
+                const collapsed = adminLayout.classList.toggle('collapsed');
+                sidebarToggle.setAttribute('aria-pressed', collapsed.toString());
+            });
+        });
+    </script>
     <link rel="stylesheet" href="css/admin-analytics.css">
 </head>
 <body>
 <div class="admin-layout">
     <aside class="sidebar">
         <div class="sidebar-header">
+            <button type="button" id="sidebarToggle" class="sidebar-toggle" aria-pressed="false" aria-label="Toggle sidebar">☰</button>
             <div class="logo-circle">
                 <span class="logo-icon">⧉</span>
             </div>

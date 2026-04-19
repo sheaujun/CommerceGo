@@ -3,8 +3,10 @@ session_start();
 require_once __DIR__ . '/db.php';
 
 $errors = [];
+$selectedRole = $_POST['role'] ?? 'admin';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $selectedRole = $_POST['role'] ?? 'admin';
     $emailOrUser = trim($_POST['email_or_username'] ?? '');
     $password    = $_POST['password'] ?? '';
 
@@ -22,7 +24,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $result = $stmt->get_result();
 
         if ($row = $result->fetch_assoc()) {
-            if (password_verify($password, $row['password'])) {
+            if (password_verify($password, $row['password']) && $row['role'] === $selectedRole) {
                 $_SESSION['userID']   = $row['userID'];
                 $_SESSION['userName'] = $row['userName'];
                 $_SESSION['email']    = $row['email'];
@@ -33,7 +35,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 } elseif ($row['role'] === 'staff') {
                     header('Location: staff/index.php');
                 } else {
-                    header('Location: dashboard.php');
+                    header('Location: customer/dashboard.php');
                 }
                 exit;
             } else {
@@ -84,21 +86,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <label class="field-label">Select Role</label>
                 <div class="role-grid">
                     <label class="role-card">
-                        <input type="radio" name="role" value="admin" checked>
+                        <input type="radio" name="role" value="admin" <?php echo ($selectedRole === 'admin' ? 'checked' : ''); ?>>
                         <div class="role-body">
                             <div class="role-title">Administrator</div>
                             <div class="role-desc">Analytics, reports &amp; team management</div>
                         </div>
                     </label>
                     <label class="role-card">
-                        <input type="radio" name="role" value="staff">
+                        <input type="radio" name="role" value="staff" <?php echo ($selectedRole === 'staff' ? 'checked' : ''); ?>>
                         <div class="role-body">
                             <div class="role-title">Pharmacy Staff</div>
                             <div class="role-desc">Inventory, compliance &amp; stock sync</div>
                         </div>
                     </label>
                     <label class="role-card">
-                        <input type="radio" name="role" value="customer">
+                        <input type="radio" name="role" value="customer" <?php echo ($selectedRole === 'customer' ? 'checked' : ''); ?>>
                         <div class="role-body">
                             <div class="role-title">Customer</div>
                             <div class="role-desc">Browse products &amp; place orders</div>

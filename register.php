@@ -43,19 +43,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $hashedPassword = password_hash($password, PASSWORD_BCRYPT);
         $role = 'customer';
 
-        $stmt = $conn->prepare(
-            'INSERT INTO users (userName, firstName, lastName, email, password, role, phoneNo)
-             VALUES (?, ?, ?, ?, ?, ?, ?)'
-        );
-        $stmt->bind_param('sssssss', $userName, $firstName, $lastName, $email, $hashedPassword, $role, $phoneNo);
+        // Start transaction
+        $conn->begin_transaction();
 
-        if ($stmt->execute()) {
+        try {
+            // Insert into users table
+            $stmt = $conn->prepare(
+                'INSERT INTO users (userName, firstName, lastName, email, password, role, phoneNo)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)'
+            );
+            $stmt->bind_param('sssssss', $userName, $firstName, $lastName, $email, $hashedPassword, $role, $phoneNo);
+            $stmt->execute();
+            $userId = $conn->insert_id;
+            $stmt->close();
+
+            // Generate customer code
+            $customerCode = 'CUST' . str_pad($userId, 3, '0', STR_PAD_LEFT);
+
+            // Insert into customers table
+            $fullName = $firstName . ' ' . $lastName;
+            $customerStmt = $conn->prepare(
+                'INSERT INTO customers (user_id, customer_code, name, email, phone, status)
+                 VALUES (?, ?, ?, ?, ?, ?)'
+            );
+            $customerStmt->bind_param('isssss', $userId, $customerCode, $fullName, $email, $phoneNo, $role);
+            $customerStmt->execute();
+            $customerStmt->close();
+
+            $conn->commit();
             $success = 'Registration successful. You can now log in.';
-        } else {
+        } catch (Exception $e) {
+            $conn->rollback();
             $errors[] = 'Registration failed. Please try again.';
         }
-
-        $stmt->close();
     }
 }
 ?>
