@@ -1,0 +1,908 @@
+<?php
+session_start();
+require_once __DIR__ . '/../db.php';
+require_once __DIR__ . '/../includes/product-import.php';
+
+if (!isset($_SESSION['userID']) || ($_SESSION['role'] ?? '') !== 'staff') {
+    header('Location: ../login.php');
+    exit;
+}
+
+$errors = [];
+$success = '';
+
+// Handle product spreadsheet import
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'import_products') {
+    $importStarted = false;
+    try {
+        $productsToImport = productsFromUploadedSpreadsheet($_FILES['product_import_file'] ?? []);
+        $conn->begin_transaction();
+        $importStarted = true;
+        $importedCount = insertProducts($conn, $productsToImport);
+        $conn->commit();
+        $success = $importedCount . ' product' . ($importedCount === 1 ? '' : 's') . ' imported successfully.';
+    } catch (Throwable $e) {
+        if ($importStarted) {
+            $conn->rollback();
+        }
+        $errors[] = $e->getMessage();
+    }
+}
+
+// Handle add product
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_product') {
+    $name        = trim($_POST['product_name'] ?? '');
+    $imagePath   = trim($_POST['image_path'] ?? '');
+    $description = trim($_POST['description'] ?? '');
+    $category    = trim($_POST['category'] ?? '');
+    $price       = (float)($_POST['price'] ?? 0);
+    $stock       = (int)($_POST['stock'] ?? 0);
+    $productType = $_POST['product_type'] ?? 'Both';
+    $status      = $_POST['status'] === 'Inactive' ? 'Inactive' : 'Active';
+    $compliance  = $_POST['compliance'] ?? 'Pending';
+    $expiryDate  = $_POST['expiry_date'] ?? null;
+
+    if (isset($_FILES['image_file']) && $_FILES['image_file']['error'] !== UPLOAD_ERR_NO_FILE) {
+        if ($_FILES['image_file']['error'] !== UPLOAD_ERR_OK) {
+            $errors[] = 'Failed to upload image. Please try again.';
+        } else {
+            $allowedTypes = [
+                'image/jpeg' => 'jpg',
+                'image/png' => 'png',
+                'image/gif' => 'gif',
+            ];
+            $fileType = mime_content_type($_FILES['image_file']['tmp_name']);
+            if (!isset($allowedTypes[$fileType])) {
+                $errors[] = 'Only JPG, PNG, and GIF images are allowed.';
+            } else {
+                $uploadDir = __DIR__ . '/../admin/uploads/products';
+                if (!is_dir($uploadDir) && !mkdir($uploadDir, 0755, true)) {
+                    $errors[] = 'Unable to create upload folder.';
+                } else {
+                    $extension = $allowedTypes[$fileType];
+                    $fileName = 'product_' . time() . '_' . bin2hex(random_bytes(5)) . '.' . $extension;
+                    $destination = $uploadDir . '/' . $fileName;
+                    if (move_uploaded_file($_FILES['image_file']['tmp_name'], $destination)) {
+                        $imagePath = normalizeProductImagePath('uploads/products/' . $fileName);
+                    } else {
+                        $errors[] = 'Unable to save uploaded image.';
+                    }
+                }
+            }
+        }
+    }
+
+    if ($name === '') {
+        $errors[] = 'Product name is required.';
+    }
+    if ($category === '') {
+        $errors[] = 'Category is required.';
+    }
+    if ($price < 0) {
+        $errors[] = 'Price cannot be negative.';
+    }
+    if ($stock < 0) {
+        $errors[] = 'Stock cannot be negative.';
+    }
+
+    if (empty($errors)) {
+        $physicalStock = 0;
+        $onlineStock = $stock;
+        $stmt = $conn->prepare(
+            'INSERT INTO products (productName, productDescription, category, price, stockQuantity, physicalStock, onlineStock, productType, complianceStatus, status, imagePath, expiryDate)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        );
+        $stmt->bind_param(
+            'sssiiiiissss',
+            $name,
+            $description,
+            $category,
+            $price,
+            $stock,
+            $physicalStock,
+            $onlineStock,
+            $productType,
+            $compliance,
+            $status,
+            $imagePath,
+            $expiryDate
+        );
+
+        if ($stmt->execute()) {
+            $success = 'Product added successfully.';
+        } else {
+            $errors[] = 'Failed to add product. Please try again.';
+        }
+        $stmt->close();
+    }
+}
+
+// Handle edit product
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'edit_product') {
+    $productId   = (int)($_POST['product_id'] ?? 0);
+    $name        = trim($_POST['edit_product_name'] ?? '');
+    $imagePath   = trim($_POST['edit_image_path'] ?? '');
+    $description = trim($_POST['edit_description'] ?? '');
+    $category    = trim($_POST['edit_category'] ?? '');
+    $price       = (float)($_POST['edit_price'] ?? 0);
+    $stock       = (int)($_POST['edit_stock'] ?? 0);
+    $productType = $_POST['edit_product_type'] ?? 'Both';
+    $status      = $_POST['edit_status'] === 'Inactive' ? 'Inactive' : 'Active';
+    $compliance  = $_POST['edit_compliance'] ?? 'Pending';
+    $expiryDate  = $_POST['edit_expiry_date'] ?? null;
+
+    if (isset($_FILES['edit_image_file']) && $_FILES['edit_image_file']['error'] !== UPLOAD_ERR_NO_FILE) {
+        if ($_FILES['edit_image_file']['error'] !== UPLOAD_ERR_OK) {
+            $errors[] = 'Failed to upload image. Please try again.';
+        } else {
+            $allowedTypes = [
+                'image/jpeg' => 'jpg',
+                'image/png' => 'png',
+                'image/gif' => 'gif',
+            ];
+            $fileType = mime_content_type($_FILES['edit_image_file']['tmp_name']);
+            if (!isset($allowedTypes[$fileType])) {
+                $errors[] = 'Only JPG, PNG, and GIF images are allowed.';
+            } else {
+                $uploadDir = __DIR__ . '/../admin/uploads/products';
+                if (!is_dir($uploadDir) && !mkdir($uploadDir, 0755, true)) {
+                    $errors[] = 'Unable to create upload folder.';
+                } else {
+                    $extension = $allowedTypes[$fileType];
+                    $fileName = 'product_' . time() . '_' . bin2hex(random_bytes(5)) . '.' . $extension;
+                    $destination = $uploadDir . '/' . $fileName;
+                    if (move_uploaded_file($_FILES['edit_image_file']['tmp_name'], $destination)) {
+                        $imagePath = normalizeProductImagePath('uploads/products/' . $fileName);
+                    } else {
+                        $errors[] = 'Unable to save uploaded image.';
+                    }
+                }
+            }
+        }
+    }
+
+    if ($productId <= 0) {
+        $errors[] = 'Invalid product selected.';
+    } else {
+        if ($name === '') {
+            $errors[] = 'Product name is required.';
+        }
+        if ($category === '') {
+            $errors[] = 'Category is required.';
+        }
+        if ($price < 0) {
+            $errors[] = 'Price cannot be negative.';
+        }
+        if ($stock < 0) {
+            $errors[] = 'Stock cannot be negative.';
+        }
+    }
+
+    if (empty($errors) && $productId > 0) {
+        $physicalStock = 0;
+        $onlineStock = $stock;
+        $stmt = $conn->prepare(
+            'UPDATE products
+             SET productName = ?, productDescription = ?, category = ?, price = ?, stockQuantity = ?,
+                 physicalStock = ?, onlineStock = ?, productType = ?,
+                 complianceStatus = ?, status = ?, imagePath = ?, expiryDate = ?
+             WHERE productID = ?'
+        );
+        $stmt->bind_param(
+            'sssiiiiissssi',
+            $name,
+            $description,
+            $category,
+            $price,
+            $stock,
+            $physicalStock,
+            $onlineStock,
+            $productType,
+            $compliance,
+            $status,
+            $imagePath,
+            $expiryDate,
+            $productId
+        );
+
+        if ($stmt->execute()) {
+            $success = 'Product updated successfully.';
+        } else {
+            $errors[] = 'Failed to update product. Please try again.';
+        }
+        $stmt->close();
+    }
+}
+
+// Handle delete product
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delete_product') {
+    $productId = (int)($_POST['product_id'] ?? 0);
+    if ($productId > 0) {
+        $stmt = $conn->prepare('DELETE FROM products WHERE productID = ?');
+        $stmt->bind_param('i', $productId);
+        if ($stmt->execute()) {
+            $success = 'Product deleted successfully.';
+        } else {
+            $errors[] = 'Failed to delete product. Please try again.';
+        }
+        $stmt->close();
+    } else {
+        $errors[] = 'Invalid product selected for deletion.';
+    }
+}
+
+// List and filters
+$search    = trim($_GET['q'] ?? '');
+$categoryF = trim($_GET['cat'] ?? '');
+$where     = '1=1';
+$params    = [];
+$types     = '';
+
+if ($search !== '') {
+    $where .= ' AND (productName LIKE ? OR productDescription LIKE ?)';
+    $like = '%' . $search . '%';
+    $params[] = $like;
+    $params[] = $like;
+    $types .= 'ss';
+}
+
+if ($categoryF !== '' && $categoryF !== 'All') {
+    $where .= ' AND category = ?';
+    $params[] = $categoryF;
+    $types .= 's';
+}
+
+$sql = "SELECT productID, productName, productDescription, category, price, stockQuantity, productType,
+               complianceStatus, status, imagePath, expiryDate
+        FROM products
+        WHERE $where
+        ORDER BY productName ASC";
+
+$stmt = $conn->prepare($sql);
+if (!empty($params)) {
+    $stmt->bind_param($types, ...$params);
+}
+$stmt->execute();
+$result = $stmt->get_result();
+$products = $result->fetch_all(MYSQLI_ASSOC);
+$stmt->close();
+
+$catResult = $conn->query('SELECT DISTINCT category FROM products ORDER BY category ASC');
+$categories = $catResult ? $catResult->fetch_all(MYSQLI_ASSOC) : [];
+
+function normalizeProductImagePath(string $path): string {
+    $path = trim($path);
+    if ($path === '') {
+        return '';
+    }
+    if (strpos($path, '://') !== false || str_starts_with($path, '/')) {
+        return $path;
+    }
+    $rootPath = rtrim(dirname($_SERVER['SCRIPT_NAME']), '/') . '/../admin/' . ltrim($path, '/');
+    return preg_replace('#/+#', '/', $rootPath);
+}
+
+function resolveProductImageUrl(string $path): string {
+    if ($path === '') {
+        return '';
+    }
+    if (strpos($path, '://') !== false || str_starts_with($path, '/')) {
+        return $path;
+    }
+    $rootPath = rtrim(dirname($_SERVER['SCRIPT_NAME']), '/') . '/../admin/' . ltrim($path, '/');
+    return preg_replace('#/+#', '/', $rootPath);
+}
+?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Essen Pharmacy - Staff Product Management</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="css/staff-dashboard.css">
+    <link rel="stylesheet" href="../admin/css/admin-products.css">
+</head>
+<body>
+<div class="staff-layout">
+    <aside class="staff-sidebar">
+        <div class="sidebar-header">
+            <button type="button" id="sidebarToggle" class="sidebar-toggle" aria-pressed="false" aria-label="Toggle sidebar">
+                <span class="toggle-icon">☰</span>
+            </button>
+            <div class="logo-circle">
+                <img src="../EssenPharmacy.png" alt="Essen Pharmacy" class="logo-image">
+            </div>
+            <div class="sidebar-brand">
+                <div class="brand-title">Essen Pharmacy</div>
+                <div class="brand-subtitle">Staff Portal</div>
+            </div>
+        </div>
+
+        <nav class="sidebar-nav">
+            <a href="dashboard.php" class="nav-item">
+                <span class="nav-icon">🏠</span>
+                <span class="nav-label">Inventory Sync</span>
+            </a>
+            <a href="add-product.php" class="nav-item">
+                <span class="nav-icon">➕</span>
+                <span class="nav-label">Add Product</span>
+            </a>
+            <a href="products.php" class="nav-item active">
+                <span class="nav-icon">💊</span>
+                <span class="nav-label">Products</span>
+            </a>
+            <a href="profile.php" class="nav-item">
+                <span class="nav-icon">👤</span>
+                <span class="nav-label">Profile</span>
+            </a>
+        </nav>
+
+        <div class="sidebar-footer">
+            <a href="../logout.php" class="nav-item logout-item">
+                <span class="nav-icon">↩</span>
+                <span class="nav-label">Sign Out</span>
+            </a>
+        </div>
+    </aside>
+
+    <main class="main-content">
+        <div class="product-header">
+            <div class="product-header-title">
+                <h1>Product Management</h1>
+                <p>Manage pharmacy products and inventory.</p>
+            </div>
+            <button type="button" class="btn-add-product" id="openAddProduct">
+                <span class="btn-add-product-icon">＋</span>
+                Add Product
+            </button>
+        </div>
+
+        <?php if (!empty($errors)): ?>
+            <div class="message error">
+                <?php echo htmlspecialchars(implode(' ', $errors)); ?>
+            </div>
+        <?php endif; ?>
+        <?php if ($success): ?>
+            <div class="message success">
+                <?php echo htmlspecialchars($success); ?>
+            </div>
+        <?php endif; ?>
+
+        <section class="product-import-card">
+            <div>
+                <h2>Import Products</h2>
+                <p>Upload .xlsx or .csv with columns: productName, description, category, price, stock, imagePath, expiryDate, status, compliance.</p>
+            </div>
+            <form method="post" action="products.php" enctype="multipart/form-data" class="product-import-form">
+                <input type="hidden" name="action" value="import_products">
+                <input type="file" name="product_import_file" accept=".xlsx,.csv" required>
+                <button type="submit" class="btn-primary">Import File</button>
+            </form>
+        </section>
+
+        <div class="product-search-row">
+            <div class="product-search-card">
+                <form method="get" action="products.php">
+                    <input
+                        type="text"
+                        name="q"
+                        class="product-search-input"
+                        placeholder="Search products..."
+                        value="<?php echo htmlspecialchars($search); ?>"
+                    >
+                </form>
+            </div>
+            <div class="product-filter-card">
+                <form method="get" action="products.php">
+                    <select name="cat" class="product-filter-select" onchange="this.form.submit()">
+                        <option value="All">All Categories</option>
+                        <?php foreach ($categories as $cat): ?>
+                            <?php $cName = $cat['category']; ?>
+                            <option value="<?php echo htmlspecialchars($cName); ?>" <?php echo $categoryF === $cName ? 'selected' : ''; ?> >
+                                <?php echo htmlspecialchars($cName); ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </form>
+            </div>
+        </div>
+
+        <div class="product-list-card">
+            <div class="product-list-header">
+                <h2>All Products</h2>
+                <div class="product-count">(<?php echo count($products); ?>)</div>
+            </div>
+
+            <table class="product-table">
+                <thead>
+                <tr>
+                    <th>Product</th>
+                    <th>Category</th>
+                    <th>Price</th>
+                    <th>Stock</th>
+                    <th>Status</th>
+                    <th>Expiry</th>
+                    <th></th>
+                </tr>
+                </thead>
+                <tbody>
+                <?php if (empty($products)): ?>
+                    <tr>
+                        <td colspan="7">No products found.</td>
+                    </tr>
+                <?php else: ?>
+                    <?php foreach ($products as $p): ?>
+                        <tr>
+                            <td>
+                                <div class="product-main">
+                                    <div class="product-thumb">
+                                        <?php if (!empty($p['imagePath'])): ?>
+                                            <img src="<?php echo htmlspecialchars(resolveProductImageUrl($p['imagePath'])); ?>" alt="">
+                                        <?php else: ?>
+                                            <span>💊</span>
+                                        <?php endif; ?>
+                                    </div>
+                                    <div>
+                                        <div class="product-name"><?php echo htmlspecialchars($p['productName']); ?></div>
+                                        <?php if (!empty($p['productDescription'])): ?>
+                                            <div class="product-desc"><?php echo htmlspecialchars($p['productDescription']); ?></div>
+                                        <?php endif; ?>
+                                    </div>
+                                </div>
+                            </td>
+                            <td>
+                                <span class="badge-category"><?php echo htmlspecialchars($p['category']); ?></span>
+                            </td>
+                            <td>
+                                <span class="product-price">RM<?php echo number_format($p['price'], 2); ?></span>
+                            </td>
+                            <td>
+                                <?php if ($p['stockQuantity'] <= 50): ?>
+                                    <span class="product-stock-low"><?php echo (int)$p['stockQuantity']; ?></span>
+                                <?php else: ?>
+                                    <?php echo (int)$p['stockQuantity']; ?>
+                                <?php endif; ?>
+                            </td>
+                            <td>
+                                <?php
+                                $status = $p['status'];
+                                $badgeClass = strtolower($status) === 'inactive' ? 'inactive' : 'approved';
+                                if ($p['complianceStatus'] === 'Pending') {
+                                    $badgeClass = 'pending';
+                                }
+                                ?>
+                                <span class="badge-status <?php echo $badgeClass; ?>">
+                                    <?php echo htmlspecialchars($status === 'Active' ? $p['complianceStatus'] : $status); ?>
+                                </span>
+                            </td>
+                            <td>
+                                <span class="product-expiry">
+                                    <?php echo htmlspecialchars($p['expiryDate'] ?? '-'); ?>
+                                </span>
+                            </td>
+                            <td>
+                                <div class="product-actions"
+                                     data-product-id="<?php echo (int)$p['productID']; ?>"
+                                     data-name="<?php echo htmlspecialchars($p['productName']); ?>"
+                                     data-image="<?php echo htmlspecialchars(resolveProductImageUrl($p['imagePath'] ?? '')); ?>"
+                                     data-desc="<?php echo htmlspecialchars($p['productDescription'] ?? ''); ?>"
+                                     data-category="<?php echo htmlspecialchars($p['category']); ?>"
+                                     data-price="<?php echo htmlspecialchars($p['price']); ?>"
+                                     data-stock="<?php echo htmlspecialchars($p['stockQuantity']); ?>"
+                                     data-product-type="<?php echo htmlspecialchars($p['productType'] ?? 'Both'); ?>"
+                                     data-status="<?php echo htmlspecialchars($p['status']); ?>"
+                                     data-compliance="<?php echo htmlspecialchars($p['complianceStatus']); ?>"
+                                     data-expiry="<?php echo htmlspecialchars($p['expiryDate'] ?? ''); ?>">
+                                    <button type="button" class="product-actions-btn">⋯</button>
+                                    <div class="product-actions-menu">
+                                        <button type="button" class="product-edit-btn">Edit</button>
+                                        <form method="post" action="products.php" onsubmit="return confirm('Delete this product?');">
+                                            <input type="hidden" name="action" value="delete_product">
+                                            <input type="hidden" name="product_id" value="<?php echo (int)$p['productID']; ?>">
+                                            <button type="submit" class="product-delete-btn">Delete</button>
+                                        </form>
+                                    </div>
+                                </div>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
+    </main>
+</div>
+
+<div class="product-modal-backdrop" id="addProductModal">
+    <div class="product-modal">
+        <div class="product-modal-header">
+            <div class="product-modal-title">Add New Product</div>
+            <button type="button" class="product-modal-close" id="closeAddProduct">×</button>
+        </div>
+        <div class="product-modal-body">
+            <form method="post" action="products.php" enctype="multipart/form-data">
+                <input type="hidden" name="action" value="add_product">
+
+                <div class="product-modal-field">
+                    <label class="product-modal-label" for="image_file">Product Image</label>
+                    <input type="file" id="image_file" name="image_file" accept="image/jpeg,image/png,image/gif" class="product-modal-input">
+                    <label class="product-modal-label" for="image_path">or Image URL (optional)</label>
+                    <input type="text" id="image_path" name="image_path" class="product-modal-input" placeholder="https://example.com/image.jpg">
+                    <div class="product-image-preview-container">
+                        <img id="image_path_preview" class="product-image-preview" src="" alt="Product image preview">
+                        <span id="image_path_preview_placeholder" class="product-image-preview-placeholder">Upload an image file or enter a valid image URL to preview.</span>
+                    </div>
+                </div>
+
+                <div class="product-modal-field">
+                    <label class="product-modal-label" for="product_name">Product Name</label>
+                    <input type="text" id="product_name" name="product_name" class="product-modal-input" required>
+                </div>
+
+                <div class="product-modal-field">
+                    <label class="product-modal-label" for="description">Description</label>
+                    <textarea id="description" name="description" class="product-modal-textarea"></textarea>
+                </div>
+
+                <div class="product-modal-grid">
+                    <div class="product-modal-field">
+                        <label class="product-modal-label" for="category">Category</label>
+                        <select id="category" name="category" class="product-modal-select" required>
+                            <option value="">Select category</option>
+                            <option value="Medication">Medication</option>
+                            <option value="Supplements">Supplements</option>
+                            <option value="Personal Care">Personal Care</option>
+                            <option value="Equipment">Equipment</option>
+                        </select>
+                    </div>
+                    <div class="product-modal-field">
+                        <label class="product-modal-label" for="price"></label>
+                        <input type="number" step="0.01" min="0" id="price" name="price" class="product-modal-input" required>
+                    </div>
+                </div>
+
+                <div class="product-modal-grid">
+                    <div class="product-modal-field">
+                        <label class="product-modal-label" for="stock">Stock Quantity</label>
+                        <input type="number" min="0" id="stock" name="stock" class="product-modal-input" required>
+                    </div>
+                    <div class="product-modal-field">
+                        <label class="product-modal-label" for="expiry_date">Expiry Date</label>
+                        <input type="date" id="expiry_date" name="expiry_date" class="product-modal-input">
+                    </div>
+                </div>
+
+                <!-- <div class="product-modal-grid">
+                    <div class="product-modal-field">
+                        <label class="product-modal-label" for="product_type">Product Type</label>
+                        <select id="product_type" name="product_type" class="product-modal-select">
+                            <option value="Physical">Physical</option>
+                            <option value="Online">Online</option>
+                            <option value="Both" selected>Both</option>
+                        </select>
+                    </div>
+                </div> -->
+
+                <div class="product-modal-grid">
+                    <div class="product-modal-field">
+                        <label class="product-modal-label" for="status">Status</label>
+                        <select id="status" name="status" class="product-modal-select">
+                            <option value="Active">Active</option>
+                            <option value="Inactive">Inactive</option>
+                        </select>
+                    </div>
+                    <div class="product-modal-field">
+                        <label class="product-modal-label" for="compliance">Compliance</label>
+                        <select id="compliance" name="compliance" class="product-modal-select">
+                            <option value="Approved">Approved</option>
+                            <option value="Pending">Pending</option>
+                            <option value="Rejected">Rejected</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="product-modal-footer">
+                    <button type="button" class="btn-secondary" id="cancelAddProduct">Cancel</button>
+                    <button type="submit" class="btn-primary">Add Product</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<div class="product-modal-backdrop" id="editProductModal">
+    <div class="product-modal">
+        <div class="product-modal-header">
+            <div class="product-modal-title">Edit Product</div>
+            <button type="button" class="product-modal-close" id="closeEditProduct">×</button>
+        </div>
+        <div class="product-modal-body">
+            <form method="post" action="products.php" enctype="multipart/form-data">
+                <input type="hidden" name="action" value="edit_product">
+                <input type="hidden" name="product_id" id="edit_product_id">
+
+                <div class="product-modal-field">
+                    <label class="product-modal-label" for="edit_image_file">Product Image</label>
+                    <input type="file" id="edit_image_file" name="edit_image_file" accept="image/jpeg,image/png,image/gif" class="product-modal-input">
+                    <label class="product-modal-label" for="edit_image_path">or Image URL</label>
+                    <input type="text" id="edit_image_path" name="edit_image_path" class="product-modal-input" placeholder="https://example.com/image.jpg">
+                    <div class="product-image-preview-container">
+                        <img id="edit_image_path_preview" class="product-image-preview" src="" alt="Product image preview">
+                        <span id="edit_image_path_preview_placeholder" class="product-image-preview-placeholder">Upload an image file or enter a valid image URL to preview.</span>
+                    </div>
+                </div>
+
+                <div class="product-modal-field">
+                    <label class="product-modal-label" for="edit_product_name">Product Name</label>
+                    <input type="text" id="edit_product_name" name="edit_product_name" class="product-modal-input" required>
+                </div>
+
+                <div class="product-modal-field">
+                    <label class="product-modal-label" for="edit_description">Description</label>
+                    <textarea id="edit_description" name="edit_description" class="product-modal-textarea"></textarea>
+                </div>
+
+                <div class="product-modal-grid">
+                    <div class="product-modal-field">
+                        <label class="product-modal-label" for="edit_category">Category</label>
+                        <select id="edit_category" name="edit_category" class="product-modal-select" required>
+                            <option value="Medication">Medication</option>
+                            <option value="Supplements">Supplements</option>
+                            <option value="Personal Care">Personal Care</option>
+                            <option value="Equipment">Equipment</option>
+                        </select>
+                    </div>
+                    <div class="product-modal-field">
+                        <label class="product-modal-label" for="edit_price">Price (RM)</label>
+                        <input type="number" step="0.01" min="0" id="edit_price" name="edit_price" class="product-modal-input" required>
+                    </div>
+                </div>
+
+                <div class="product-modal-grid">
+                    <div class="product-modal-field">
+                        <label class="product-modal-label" for="edit_stock">Stock Quantity</label>
+                        <input type="number" min="0" id="edit_stock" name="edit_stock" class="product-modal-input" required>
+                    </div>
+                    <div class="product-modal-field">
+                        <label class="product-modal-label" for="edit_expiry_date">Expiry Date</label>
+                        <input type="date" id="edit_expiry_date" name="edit_expiry_date" class="product-modal-input">
+                    </div>
+                </div>
+
+                <!-- <div class="product-modal-grid">
+                    <div class="product-modal-field">
+                        <label class="product-modal-label" for="edit_product_type">Product Type</label>
+                        <select id="edit_product_type" name="edit_product_type" class="product-modal-select">
+                            <option value="Physical">Physical</option>
+                            <option value="Online">Online</option>
+                            <option value="Both">Both</option>
+                        </select>
+                    </div>
+                </div> -->
+
+                <div class="product-modal-grid">
+                    <div class="product-modal-field">
+                        <label class="product-modal-label" for="edit_status">Status</label>
+                        <select id="edit_status" name="edit_status" class="product-modal-select">
+                            <option value="Active">Active</option>
+                            <option value="Inactive">Inactive</option>
+                        </select>
+                    </div>
+                    <div class="product-modal-field">
+                        <label class="product-modal-label" for="edit_compliance">Compliance</label>
+                        <select id="edit_compliance" name="edit_compliance" class="product-modal-select">
+                            <option value="Approved">Approved</option>
+                            <option value="Pending">Pending</option>
+                            <option value="Rejected">Rejected</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="product-modal-footer">
+                    <button type="button" class="btn-secondary" id="cancelEditProduct">Cancel</button>
+                    <button type="submit" class="btn-primary">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+    const openAddProductBtn = document.getElementById('openAddProduct');
+    const closeAddProductBtn = document.getElementById('closeAddProduct');
+    const cancelAddProductBtn = document.getElementById('cancelAddProduct');
+    const addProductModal = document.getElementById('addProductModal');
+    const imageFileInput = document.getElementById('image_file');
+    const imagePathInput = document.getElementById('image_path');
+    const imagePathPreview = document.getElementById('image_path_preview');
+    const imagePathPreviewPlaceholder = document.getElementById('image_path_preview_placeholder');
+    const editImageFileInput = document.getElementById('edit_image_file');
+    const editImagePath = document.getElementById('edit_image_path');
+    const editImagePathPreview = document.getElementById('edit_image_path_preview');
+    const editImagePathPreviewPlaceholder = document.getElementById('edit_image_path_preview_placeholder');
+    let currentPreviewUrl = null;
+
+    function setPreviewImageFromSource(fileInput, urlInput, imageEl, placeholderEl) {
+        if (fileInput && fileInput.files && fileInput.files[0]) {
+            if (currentPreviewUrl) {
+                URL.revokeObjectURL(currentPreviewUrl);
+            }
+            const file = fileInput.files[0];
+            currentPreviewUrl = URL.createObjectURL(file);
+            imageEl.src = currentPreviewUrl;
+            placeholderEl.style.display = 'none';
+            imageEl.style.display = 'block';
+            return;
+        }
+
+        const url = urlInput.value.trim();
+        if (!url) {
+            imageEl.src = '';
+            imageEl.style.display = 'none';
+            placeholderEl.textContent = 'Upload an image file or enter a valid image URL to preview.';
+            placeholderEl.style.display = 'block';
+            return;
+        }
+
+        imageEl.src = url;
+        placeholderEl.style.display = 'none';
+        imageEl.style.display = 'block';
+    }
+
+    if (imagePathInput) {
+        imagePathInput.addEventListener('input', function () {
+            setPreviewImageFromSource(imageFileInput, imagePathInput, imagePathPreview, imagePathPreviewPlaceholder);
+        });
+    }
+
+    if (imageFileInput) {
+        imageFileInput.addEventListener('change', function () {
+            setPreviewImageFromSource(imageFileInput, imagePathInput, imagePathPreview, imagePathPreviewPlaceholder);
+        });
+    }
+
+    if (editImagePath) {
+        editImagePath.addEventListener('input', function () {
+            setPreviewImageFromSource(editImageFileInput, editImagePath, editImagePathPreview, editImagePathPreviewPlaceholder);
+        });
+    }
+
+    if (editImageFileInput) {
+        editImageFileInput.addEventListener('change', function () {
+            setPreviewImageFromSource(editImageFileInput, editImagePath, editImagePathPreview, editImagePathPreviewPlaceholder);
+        });
+    }
+
+    if (imagePathPreview) {
+        imagePathPreview.addEventListener('error', function () {
+            this.style.display = 'none';
+            imagePathPreviewPlaceholder.textContent = 'Unable to preview image. Please check the file or URL.';
+            imagePathPreviewPlaceholder.style.display = 'block';
+        });
+    }
+
+    if (editImagePathPreview) {
+        editImagePathPreview.addEventListener('error', function () {
+            this.style.display = 'none';
+            editImagePathPreviewPlaceholder.textContent = 'Unable to preview image. Please check the file or URL.';
+            editImagePathPreviewPlaceholder.style.display = 'block';
+        });
+    }
+
+    function openAddProductModal() {
+        if (addProductModal) {
+            if (imageFileInput) imageFileInput.value = '';
+            if (imagePathInput) imagePathInput.value = '';
+            setPreviewImageFromSource(imageFileInput, imagePathInput, imagePathPreview, imagePathPreviewPlaceholder);
+            addProductModal.classList.add('show');
+        }
+    }
+    function closeAddProductModal() {
+        if (addProductModal) addProductModal.classList.remove('show');
+    }
+
+    if (openAddProductBtn) openAddProductBtn.addEventListener('click', openAddProductModal);
+    if (closeAddProductBtn) closeAddProductBtn.addEventListener('click', closeAddProductModal);
+    if (cancelAddProductBtn) cancelAddProductBtn.addEventListener('click', closeAddProductModal);
+
+    window.addEventListener('click', function (e) {
+        if (e.target === addProductModal) {
+            closeAddProductModal();
+        }
+    });
+
+    const editProductModal = document.getElementById('editProductModal');
+    const closeEditProductBtn = document.getElementById('closeEditProduct');
+    const cancelEditProductBtn = document.getElementById('cancelEditProduct');
+    const editProductId = document.getElementById('edit_product_id');
+    const editProductName = document.getElementById('edit_product_name');
+    const editDescription = document.getElementById('edit_description');
+    const editCategory = document.getElementById('edit_category');
+    const editPrice = document.getElementById('edit_price');
+    const editStock = document.getElementById('edit_stock');
+    const editExpiryDate = document.getElementById('edit_expiry_date');
+    const editProductType = document.getElementById('edit_product_type');
+    const editStatus = document.getElementById('edit_status');
+    const editCompliance = document.getElementById('edit_compliance');
+
+    function openEditProductModal() {
+        if (editProductModal) editProductModal.classList.add('show');
+    }
+    function closeEditProductModal() {
+        if (editProductModal) editProductModal.classList.remove('show');
+    }
+
+    document.querySelectorAll('.product-actions-btn').forEach(function (btn) {
+        btn.addEventListener('click', function (e) {
+            e.stopPropagation();
+            const container = btn.parentElement;
+            const menu = container.querySelector('.product-actions-menu');
+            document.querySelectorAll('.product-actions-menu').forEach(function (m) {
+                if (m !== menu) m.classList.remove('show');
+            });
+            if (menu) menu.classList.toggle('show');
+        });
+    });
+
+    document.querySelectorAll('.product-edit-btn').forEach(function (btn) {
+        btn.addEventListener('click', function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+            const container = btn.closest('.product-actions');
+            if (!container) return;
+            const menu = container.querySelector('.product-actions-menu');
+            if (menu) menu.classList.remove('show');
+
+            editProductId.value = container.getAttribute('data-product-id') || '';
+            editImagePath.value = container.getAttribute('data-image') || '';
+            if (editImageFileInput) {
+                editImageFileInput.value = '';
+            }
+            editProductName.value = container.getAttribute('data-name') || '';
+            editDescription.value = container.getAttribute('data-desc') || '';
+            editCategory.value = container.getAttribute('data-category') || 'Medication';
+            editPrice.value = container.getAttribute('data-price') || '0';
+            editStock.value = container.getAttribute('data-stock') || '0';
+            editProductType.value = container.getAttribute('data-product-type') || 'Both';
+            editExpiryDate.value = container.getAttribute('data-expiry') || '';
+            editStatus.value = container.getAttribute('data-status') || 'Active';
+            editCompliance.value = container.getAttribute('data-compliance') || 'Approved';
+            setPreviewImageFromSource(editImageFileInput, editImagePath, editImagePathPreview, editImagePathPreviewPlaceholder);
+
+            openEditProductModal();
+        });
+    });
+
+    if (closeEditProductBtn) closeEditProductBtn.addEventListener('click', function (e) {
+        e.preventDefault();
+        closeEditProductModal();
+    });
+    if (cancelEditProductBtn) cancelEditProductBtn.addEventListener('click', function (e) {
+        e.preventDefault();
+        closeEditProductModal();
+    });
+
+    window.addEventListener('click', function (e) {
+        if (e.target === editProductModal) {
+            closeEditProductModal();
+        }
+    });
+
+    window.addEventListener('click', function () {
+        document.querySelectorAll('.product-actions-menu').forEach(function (m) {
+            m.classList.remove('show');
+        });
+    });
+
+    const sidebarToggle = document.getElementById('sidebarToggle');
+    const staffLayout = document.querySelector('.staff-layout');
+
+    if (sidebarToggle && staffLayout) {
+        sidebarToggle.addEventListener('click', () => {
+            const collapsed = staffLayout.classList.toggle('collapsed');
+            sidebarToggle.setAttribute('aria-pressed', collapsed.toString());
+        });
+    }
+</script>
+</body>
+</html>

@@ -8,137 +8,157 @@ if (!isset($_SESSION['userID']) || ($_SESSION['role'] ?? '') !== 'staff') {
     exit;
 }
 
-$initialInventory = [
-    [
-        'id' => 1,
-        'name' => 'Amoxicillin 500mg',
-        'batchId' => 'BN-9902',
-        'physicalStock' => 245,
-        'onlineStock' => 240,
-        'compliant' => true,
-        'expiryDate' => '2026-03-15',
-    ],
-    [
-        'id' => 2,
-        'name' => 'Ibuprofen 400mg',
-        'batchId' => 'BN-8871',
-        'physicalStock' => 120,
-        'onlineStock' => 125,
-        'compliant' => true,
-        'expiryDate' => '2026-02-10',
-    ],
-    [
-        'id' => 3,
-        'name' => 'Paracetamol 500mg',
-        'batchId' => 'BN-7723',
-        'physicalStock' => 85,
-        'onlineStock' => 90,
-        'compliant' => false,
-        'expiryDate' => '2026-04-22',
-    ],
-    [
-        'id' => 4,
-        'name' => 'Vitamin D3 1000IU',
-        'batchId' => 'BN-6654',
-        'physicalStock' => 312,
-        'onlineStock' => 310,
-        'compliant' => true,
-        'expiryDate' => '2027-01-30',
-    ],
-    [
-        'id' => 5,
-        'name' => 'Omeprazole 20mg',
-        'batchId' => 'BN-5589',
-        'physicalStock' => 45,
-        'onlineStock' => 50,
-        'compliant' => true,
-        'expiryDate' => '2026-02-25',
-    ],
-    [
-        'id' => 6,
-        'name' => 'Metformin 850mg',
-        'batchId' => 'BN-4421',
-        'physicalStock' => 178,
-        'onlineStock' => 175,
-        'compliant' => true,
-        'expiryDate' => '2026-06-18',
-    ],
-    [
-        'id' => 7,
-        'name' => 'Cetirizine 10mg',
-        'batchId' => 'BN-3310',
-        'physicalStock' => 92,
-        'onlineStock' => 88,
-        'compliant' => false,
-        'expiryDate' => '2026-02-05',
-    ],
-    [
-        'id' => 8,
-        'name' => 'Lisinopril 10mg',
-        'batchId' => 'BN-2298',
-        'physicalStock' => 156,
-        'onlineStock' => 160,
-        'compliant' => true,
-        'expiryDate' => '2026-09-12',
-    ],
-];
-
-if (!isset($_SESSION['staff_inventory'])) {
-    $_SESSION['staff_inventory'] = $initialInventory;
-}
-
-$inventory = &$_SESSION['staff_inventory'];
+$errors = [];
+$success = '';
 $message = '';
+$searchQuery = trim($_GET['search'] ?? '');
+$selectedCategory = trim($_GET['category'] ?? 'All');
+
+function normalizeInventoryStocks(array $item): array
+{
+    $total = max(0, (int) ($item['stockQuantity'] ?? 0));
+    $physicalRaw = array_key_exists('physicalStock', $item) && $item['physicalStock'] !== null
+        ? max(0, (int) $item['physicalStock'])
+        : null;
+    $onlineRaw = array_key_exists('onlineStock', $item) && $item['onlineStock'] !== null
+        ? max(0, (int) $item['onlineStock'])
+        : null;
+
+    $isLegacyMirrored = $physicalRaw !== null
+        && $onlineRaw !== null
+        && $physicalRaw === $total
+        && $onlineRaw === $total;
+
+    if ($physicalRaw === null && $onlineRaw === null) {
+        $physical = 0;
+        $online = $total;
+    } elseif ($isLegacyMirrored) {
+        $physical = 0;
+        $online = $total;
+    } else {
+        $physical = $physicalRaw ?? 0;
+        $online = $onlineRaw ?? max(0, $total - $physical);
+        $total = $physical + $online;
+    }
+
+    $item['physicalStock'] = $physical;
+    $item['onlineStock'] = $online;
+    $item['stockQuantity'] = $total;
+
+    return $item;
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
 
-    if ($action === 'sync_all') {
-        foreach ($inventory as &$item) {
-            $item['onlineStock'] = $item['physicalStock'];
-        }
-        unset($item);
-        $message = 'All inventory has been synchronized successfully.';
-    }
-
     if ($action === 'save_row' && isset($_POST['item_id'])) {
         $itemId = (int) $_POST['item_id'];
-        $stockValue = isset($_POST['physical_stock']) ? (int) $_POST['physical_stock'] : 0;
+        $physicalStock = max(0, (int) ($_POST['physical_stock'] ?? 0));
+        $onlineStock = max(0, (int) ($_POST['online_stock'] ?? 0));
+        $totalStock = $physicalStock + $onlineStock;
 
-        foreach ($inventory as &$item) {
-            if ($item['id'] === $itemId) {
-                $item['physicalStock'] = $stockValue;
-                break;
+        $stmt = $conn->prepare(
+            'UPDATE products
+             SET physicalStock = ?, onlineStock = ?, stockQuantity = ?
+             WHERE productID = ?'
+        );
+        if ($stmt) {
+            $stmt->bind_param('iiii', $physicalStock, $onlineStock, $totalStock, $itemId);
+            if ($stmt->execute()) {
+                $message = 'Product stock saved successfully.';
+            } else {
+                $errors[] = 'Unable to save stock changes.';
             }
+            $stmt->close();
+        } else {
+            $errors[] = 'Unable to prepare the save statement.';
         }
-        unset($item);
-        $message = 'Stock record saved.';
     }
 
     if ($action === 'toggle_compliance' && isset($_POST['item_id'])) {
         $itemId = (int) $_POST['item_id'];
-        foreach ($inventory as &$item) {
-            if ($item['id'] === $itemId) {
-                $item['compliant'] = !$item['compliant'];
-                break;
+        $stmt = $conn->prepare('UPDATE products SET complianceStatus = IF(complianceStatus = \'Approved\', \'Pending\', \'Approved\') WHERE productID = ?');
+        if ($stmt) {
+            $stmt->bind_param('i', $itemId);
+            if ($stmt->execute()) {
+                $message = 'Compliance status updated.';
+            } else {
+                $errors[] = 'Unable to update compliance status.';
             }
+            $stmt->close();
+        } else {
+            $errors[] = 'Unable to prepare the compliance statement.';
         }
-        unset($item);
-        $message = 'Compliance status updated.';
     }
 }
 
-$searchQuery = trim($_GET['search'] ?? '');
-$filteredInventory = [];
-foreach ($inventory as $item) {
-    if ($searchQuery === '' || stripos($item['name'], $searchQuery) !== false || stripos($item['batchId'], $searchQuery) !== false) {
-        $filteredInventory[] = $item;
-    }
+$where = '1=1';
+$params = [];
+$types = '';
+if ($searchQuery !== '') {
+    $where .= ' AND (productName LIKE ? OR category LIKE ?)';
+    $like = '%' . $searchQuery . '%';
+    $params[] = $like;
+    $params[] = $like;
+    $types .= 'ss';
 }
 
-$totalSKUs = count($inventory);
-$pendingCompliance = count(array_filter($inventory, fn($item) => !$item['compliant']));
-$lowStockItems = count(array_filter($inventory, fn($item) => $item['physicalStock'] < 100));
+if ($selectedCategory !== '' && $selectedCategory !== 'All') {
+    $where .= ' AND category = ?';
+    $params[] = $selectedCategory;
+    $types .= 's';
+}
+
+$sql = "SELECT productID,
+               productName,
+               category,
+               complianceStatus,
+               status,
+               imagePath,
+               expiryDate,
+               stockQuantity,
+               physicalStock,
+               onlineStock,
+               COALESCE(productType, 'Both') AS productType
+        FROM products
+        WHERE $where
+        ORDER BY
+            CASE
+                WHEN expiryDate IS NULL THEN 2
+                WHEN expiryDate < CURDATE() THEN 0
+                ELSE 1
+            END ASC,
+            CASE
+                WHEN expiryDate >= CURDATE() THEN expiryDate
+                ELSE NULL
+            END ASC,
+            CASE
+                WHEN expiryDate < CURDATE() THEN expiryDate
+                ELSE NULL
+            END DESC,
+            productName ASC";
+
+$categoryResult = $conn->query("SELECT DISTINCT category FROM products ORDER BY category ASC");
+$categories = $categoryResult ? $categoryResult->fetch_all(MYSQLI_ASSOC) : [];
+
+$stmt = $conn->prepare($sql);
+if (!empty($params) && $stmt) {
+    $stmt->bind_param($types, ...$params);
+}
+if ($stmt) {
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $filteredInventory = $result->fetch_all(MYSQLI_ASSOC);
+    $stmt->close();
+    $filteredInventory = array_map('normalizeInventoryStocks', $filteredInventory);
+} else {
+    $filteredInventory = [];
+    $errors[] = 'Unable to load inventory from the database.';
+}
+
+$totalSKUs = count($filteredInventory);
+$pendingCompliance = count(array_filter($filteredInventory, fn($item) => $item['complianceStatus'] !== 'Approved'));
+$lowStockItems = count(array_filter($filteredInventory, fn($item) => $item['stockQuantity'] < 100));
 
 function isExpiringSoon($dateStr) {
     $expiryDate = new DateTime($dateStr);
@@ -153,6 +173,18 @@ function isExpired($dateStr) {
 
 function formatDate($dateStr) {
     return (new DateTime($dateStr))->format('M d, Y');
+}
+
+function resolveProductImageUrl(string $path): string {
+    $path = trim($path);
+    if ($path === '') {
+        return '';
+    }
+    if (strpos($path, '://') !== false || str_starts_with($path, '/')) {
+        return $path;
+    }
+    $rootPath = rtrim(dirname($_SERVER['SCRIPT_NAME']), '/') . '/../admin/' . ltrim($path, '/');
+    return preg_replace('#/+#', '/', $rootPath);
 }
 ?>
 <!DOCTYPE html>
@@ -171,7 +203,7 @@ function formatDate($dateStr) {
                 <span class="toggle-icon">☰</span>
             </button>
             <div class="logo-circle">
-                <span class="logo-icon">⧉</span>
+                <img src="../EssenPharmacy.png" alt="Essen Pharmacy" class="logo-image">
             </div>
             <div class="sidebar-brand">
                 <div class="brand-title">Essen Pharmacy</div>
@@ -183,15 +215,15 @@ function formatDate($dateStr) {
                 <span class="nav-icon">🏠</span>
                 <span class="nav-label">Inventory Sync</span>
             </a>
-            <a href="dashboard.php" class="nav-item">
-                <span class="nav-icon">📦</span>
-                <span class="nav-label">Stock Control</span>
+            <a href="add-product.php" class="nav-item">
+                <span class="nav-icon">➕</span>
+                <span class="nav-label">Add Product</span>
             </a>
-            <a href="#" class="nav-item">
-                <span class="nav-icon">⚠️</span>
-                <span class="nav-label">Compliance</span>
+            <a href="products.php" class="nav-item">
+                <span class="nav-icon">💊</span>
+                <span class="nav-label">Products</span>
             </a>
-            <a href="#" class="nav-item">
+            <a href="profile.php" class="nav-item">
                 <span class="nav-icon">👤</span>
                 <span class="nav-label">Profile</span>
             </a>
@@ -207,27 +239,32 @@ function formatDate($dateStr) {
         <div class="staff-page">
     <header class="page-header">
         <div>
-            <nav class="breadcrumb">
+            <!-- <nav class="breadcrumb">
                 <span>Dashboard</span>
                 <span class="breadcrumb-separator">›</span>
                 <span class="breadcrumb-current">Inventory Sync</span>
-            </nav>
+            </nav> -->
             <h1>Stock Synchronization</h1>
         </div>
 
         <div class="toolbar">
-            <form method="get" action="dashboard.php" class="search-form">
+            <form method="get" action="dashboard.php" class="toolbar-filter-form">
                 <label class="search-field">
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 3A7.5 7.5 0 1 1 3 10.5 7.509 7.509 0 0 1 10.5 3zm8.432 15.695-3.847-3.846a8.164 8.164 0 0 0 1.497-4.662A8.163 8.163 0 0 0 8.152 1.018 8.163 8.163 0 0 0 .5 9.611a8.163 8.163 0 0 0 8.152 8.592 8.161 8.161 0 0 0 4.661-1.498l3.846 3.846a.75.75 0 0 0 1.06-1.06z"></path></svg>
                     <input type="text" name="search" value="<?php echo htmlspecialchars($searchQuery); ?>" placeholder="Search medications...">
                 </label>
+                <label class="filter-field">
+                    <span class="filter-label">Category</span>
+                    <select name="category" class="filter-select" onchange="this.form.submit()">
+                        <option value="All"<?php echo $selectedCategory === 'All' ? ' selected' : ''; ?>>All Categories</option>
+                        <?php foreach ($categories as $category): ?>
+                            <option value="<?php echo htmlspecialchars($category['category']); ?>"<?php echo $selectedCategory === $category['category'] ? ' selected' : ''; ?>>
+                                <?php echo htmlspecialchars($category['category']); ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </label>
             </form>
-            <div class="toolbar-actions">
-                <form method="post" action="dashboard.php">
-                    <input type="hidden" name="action" value="sync_all">
-                    <button type="submit" class="btn-primary">Sync All</button>
-                </form>
-            </div>
         </div>
     </header>
 
@@ -239,7 +276,7 @@ function formatDate($dateStr) {
         <article class="metric-card">
             <div class="metric-icon">📦</div>
             <div>
-                <p class="metric-label">Total Online SKUs</p>
+                <p class="metric-label">Number of Products</p>
                 <p class="metric-value"><?php echo $totalSKUs; ?></p>
             </div>
         </article>
@@ -268,6 +305,7 @@ function formatDate($dateStr) {
                         <th>Batch ID</th>
                         <th>Physical Stock</th>
                         <th>Online Stock</th>
+                        <th>Total Stock</th>
                         <th>Compliance</th>
                         <th>Expiry Date</th>
                         <th class="actions-col">Actions</th>
@@ -277,17 +315,27 @@ function formatDate($dateStr) {
                     <?php foreach ($filteredInventory as $item): ?>
                         <tr>
                             <td class="product-cell">
-                                <div class="product-badge">📦</div>
-                                <span><?php echo htmlspecialchars($item['name']); ?></span>
+                                <?php $productImageUrl = resolveProductImageUrl($item['imagePath'] ?? ''); ?>
+                                <?php if ($productImageUrl !== ''): ?>
+                                    <img src="<?php echo htmlspecialchars($productImageUrl); ?>" alt="<?php echo htmlspecialchars($item['productName']); ?>" class="product-image">
+                                <?php else: ?>
+                                    <div class="product-badge">📦</div>
+                                <?php endif; ?>
+                                <span><?php echo htmlspecialchars($item['productName']); ?></span>
                             </td>
-                            <td>#<?php echo htmlspecialchars($item['batchId']); ?></td>
+                            <td>#<?php echo htmlspecialchars($item['productID']); ?></td>
                             <td>
-                                <input type="number" name="physical_stock" value="<?php echo $item['physicalStock']; ?>" min="0" class="stock-input" form="save-form-<?php echo $item['id']; ?>">
+                                <input type="number" name="physical_stock" value="<?php echo $item['physicalStock']; ?>" min="0" class="stock-input" form="save-form-<?php echo $item['productID']; ?>">
                             </td>
-                            <td><?php echo htmlspecialchars($item['onlineStock']); ?></td>
                             <td>
-                                <button type="submit" class="compliance-toggle <?php echo $item['compliant'] ? 'compliant' : 'pending'; ?>" form="toggle-form-<?php echo $item['id']; ?>">
-                                    <span><?php echo $item['compliant'] ? 'Verified' : 'Pending'; ?></span>
+                                <input type="number" name="online_stock" value="<?php echo $item['onlineStock']; ?>" min="0" class="stock-input" form="save-form-<?php echo $item['productID']; ?>">
+                            </td>
+                            <td>
+                                <span class="total-stock-pill" id="total-stock-<?php echo $item['productID']; ?>"><?php echo htmlspecialchars($item['stockQuantity']); ?></span>
+                            </td>
+                            <td>
+                                <button type="submit" class="compliance-toggle <?php echo ($item['complianceStatus'] === 'Approved') ? 'compliant' : 'pending'; ?>" form="toggle-form-<?php echo $item['productID']; ?>">
+                                    <span><?php echo ($item['complianceStatus'] === 'Approved') ? 'Verified' : 'Pending'; ?></span>
                                 </button>
                             </td>
                             <td class="expiry-cell <?php echo isExpired($item['expiryDate']) ? 'expired' : (isExpiringSoon($item['expiryDate']) ? 'expiring-soon' : ''); ?>">
@@ -297,18 +345,18 @@ function formatDate($dateStr) {
                                 <?php endif; ?>
                             </td>
                             <td class="actions-col">
-                                <button type="submit" class="btn-icon" form="save-form-<?php echo $item['id']; ?>">Save</button>
+                                <button type="submit" class="btn-icon" form="save-form-<?php echo $item['productID']; ?>">Save</button>
                             </td>
                         </tr>
                         <tr class="hidden-row">
-                            <td colspan="7">
-                                <form id="save-form-<?php echo $item['id']; ?>" method="post" action="dashboard.php" class="hidden-form">
+                            <td colspan="8">
+                                <form id="save-form-<?php echo $item['productID']; ?>" method="post" action="dashboard.php" class="hidden-form">
                                     <input type="hidden" name="action" value="save_row">
-                                    <input type="hidden" name="item_id" value="<?php echo $item['id']; ?>">
+                                    <input type="hidden" name="item_id" value="<?php echo $item['productID']; ?>">
                                 </form>
-                                <form id="toggle-form-<?php echo $item['id']; ?>" method="post" action="dashboard.php" class="hidden-form">
+                                <form id="toggle-form-<?php echo $item['productID']; ?>" method="post" action="dashboard.php" class="hidden-form">
                                     <input type="hidden" name="action" value="toggle_compliance">
-                                    <input type="hidden" name="item_id" value="<?php echo $item['id']; ?>">
+                                    <input type="hidden" name="item_id" value="<?php echo $item['productID']; ?>">
                                 </form>
                             </td>
                         </tr>
@@ -337,6 +385,27 @@ function formatDate($dateStr) {
             sidebarToggle.setAttribute('aria-pressed', collapsed.toString());
         });
     }
+
+    document.querySelectorAll('form[id^="save-form-"]').forEach((form) => {
+        const physicalInput = document.querySelector(`input[name="physical_stock"][form="${form.id}"]`);
+        const onlineInput = document.querySelector(`input[name="online_stock"][form="${form.id}"]`);
+        const productId = form.id.replace('save-form-', '');
+        const totalLabel = document.getElementById(`total-stock-${productId}`);
+
+        if (!physicalInput || !onlineInput || !totalLabel) {
+            return;
+        }
+
+        const updateTotal = () => {
+            const physical = Math.max(0, parseInt(physicalInput.value || '0', 10) || 0);
+            const online = Math.max(0, parseInt(onlineInput.value || '0', 10) || 0);
+            totalLabel.textContent = physical + online;
+        };
+
+        physicalInput.addEventListener('input', updateTotal);
+        onlineInput.addEventListener('input', updateTotal);
+        updateTotal();
+    });
 </script>
 </body>
 </html>
