@@ -37,12 +37,22 @@ body {
 .logo-circle {
     width: 40px;
     height: 40px;
-    border-radius: 999px;
+    border-radius: 0;
     display: flex;
     align-items: center;
     justify-content: center;
-    background: linear-gradient(135deg, #7c3aed, #6366f1);
-    color: #ffffff;
+    background: transparent;
+    color: inherit;
+    overflow: visible;
+}
+
+.logo-image {
+    width: 40px;
+    height: 40px;
+    max-width: 40px;
+    max-height: 40px;
+    display: block;
+    object-fit: contain;
 }
 
 .logo-icon {
@@ -231,7 +241,7 @@ body {
 }
 
 .card.large {
-    min-height: 220px;
+    min-height: 320px;
 }
 
 .card-header h2 {
@@ -242,8 +252,10 @@ body {
 .chart-bars {
     display: flex;
     align-items: flex-end;
-    gap: 18px;
-    padding: 14px 4px 0;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 250px;
+    padding: 20px 8px 8px;
 }
 
 .chart-bar {
@@ -252,16 +264,20 @@ body {
     justify-content: flex-end;
     align-items: center;
     gap: 8px;
+    flex: 1;
+    min-width: 0;
 }
 
 .chart-bar .bar {
-    width: 20px;
+    width: clamp(24px, 50%, 38px);
+    min-height: 24px;
     border-radius: 999px;
     background-color: #7c3aed;
 }
 
 .chart-bar .bar-label {
-    font-size: 11px;
+    font-size: 12px;
+    font-weight: 500;
     color: #6b7280;
 }
 

@@ -7,35 +7,99 @@ if (!isset($_SESSION['userID']) || ($_SESSION['role'] ?? '') !== 'admin') {
     exit;
 }
 
-function buildMonthLabels(int $count = 6): array
+function buildMonthLabelsBetween(DateTime $start, DateTime $end): array
 {
     $labels = [];
-    for ($i = $count - 1; $i >= 0; $i--) {
-        $date = new DateTime("first day of -{$i} month");
-        $labels[] = $date->format('M');
+    $cursor = new DateTime($start->format('Y-m-01'));
+    $limit = new DateTime($end->format('Y-m-01'));
+
+    while ($cursor <= $limit) {
+        $labels[] = $cursor->format('M');
+        $cursor->modify('+1 month');
     }
+
     return $labels;
 }
 
-$monthLabels = buildMonthLabels(6);
-$monthlySales = array_fill(0, 6, ['month' => '', 'sales' => 0, 'orders' => 0, 'customers' => 0]);
+function resolvePresetDates(string $preset): array
+{
+    $today = new DateTime('today');
+    $start = clone $today;
+    $end = clone $today;
+
+    switch ($preset) {
+        case 'today':
+            break;
+        case 'this-week':
+            $start = new DateTime('monday this week');
+            $end = new DateTime('sunday this week');
+            break;
+        case 'this-quarter':
+            $month = (int) $today->format('n');
+            $quarterStartMonth = ((int) floor(($month - 1) / 3) * 3) + 1;
+            $start = new DateTime($today->format('Y') . '-' . str_pad((string) $quarterStartMonth, 2, '0', STR_PAD_LEFT) . '-01');
+            $end = clone $today;
+            break;
+        case 'this-year':
+            $start = new DateTime($today->format('Y-01-01'));
+            $end = clone $today;
+            break;
+        case 'custom':
+            break;
+        case 'this-month':
+        default:
+            $start = new DateTime($today->format('Y-m-01'));
+            $end = new DateTime($today->format('Y-m-t'));
+            $preset = 'this-month';
+            break;
+    }
+
+    return [$preset, $start, $end];
+}
+
+$selectedPreset = trim($_GET['preset'] ?? 'this-month');
+[$selectedPreset, $filterStart, $filterEnd] = resolvePresetDates($selectedPreset);
+
+$requestedStart = trim($_GET['start'] ?? '');
+$requestedEnd = trim($_GET['end'] ?? '');
+if ($selectedPreset === 'custom' && $requestedStart !== '' && $requestedEnd !== '') {
+    $customStart = DateTime::createFromFormat('Y-m-d', $requestedStart);
+    $customEnd = DateTime::createFromFormat('Y-m-d', $requestedEnd);
+    if ($customStart && $customEnd) {
+        $filterStart = $customStart;
+        $filterEnd = $customEnd;
+    }
+}
+
+if ($filterStart > $filterEnd) {
+    [$filterStart, $filterEnd] = [$filterEnd, $filterStart];
+}
+
+$filterStartStr = $filterStart->format('Y-m-d');
+$filterEndStr = $filterEnd->format('Y-m-d');
+
+$monthLabels = buildMonthLabelsBetween($filterStart, $filterEnd);
+$monthlySales = array_fill(0, max(1, count($monthLabels)), ['month' => '', 'sales' => 0, 'orders' => 0, 'customers' => 0]);
 foreach ($monthLabels as $index => $month) {
     $monthlySales[$index]['month'] = $month;
 }
 
 $sql = "SELECT DATE_FORMAT(order_date, '%b') AS month, SUM(total) AS sales, COUNT(*) AS orders, COUNT(DISTINCT customer_id) AS customers
         FROM customer_orders
-        WHERE order_date >= DATE_SUB(CURDATE(), INTERVAL 6 MONTH)
+        WHERE order_date BETWEEN ? AND ?
         GROUP BY YEAR(order_date), MONTH(order_date)
         ORDER BY YEAR(order_date), MONTH(order_date)";
-$result = $conn->query($sql);
+$stmt = $conn->prepare($sql);
+$stmt->bind_param('ss', $filterStartStr, $filterEndStr);
+$stmt->execute();
+$result = $stmt->get_result();
 if ($result) {
     $salesByMonth = [];
     while ($row = $result->fetch_assoc()) {
         $salesByMonth[$row['month']] = [
-            'sales' => (float)$row['sales'],
-            'orders' => (int)$row['orders'],
-            'customers' => (int)$row['customers'],
+            'sales' => (float) $row['sales'],
+            'orders' => (int) $row['orders'],
+            'customers' => (int) $row['customers'],
         ];
     }
     foreach ($monthlySales as $index => $data) {
@@ -44,9 +108,8 @@ if ($result) {
         }
     }
 }
+$stmt->close();
 
-$weekStart = new DateTime('monday this week');
-$weekEnd   = new DateTime('sunday this week');
 $weeklySales = [
     'Mon' => 0,
     'Tue' => 0,
@@ -61,16 +124,14 @@ $sql = "SELECT DAYNAME(order_date) AS day, SUM(total) AS sales
         WHERE order_date BETWEEN ? AND ?
         GROUP BY DAYNAME(order_date)";
 $stmt = $conn->prepare($sql);
-$weekStartStr = $weekStart->format('Y-m-d');
-$weekEndStr = $weekEnd->format('Y-m-d');
-$stmt->bind_param('ss', $weekStartStr, $weekEndStr);
+$stmt->bind_param('ss', $filterStartStr, $filterEndStr);
 $stmt->execute();
 $result = $stmt->get_result();
 if ($result) {
     while ($row = $result->fetch_assoc()) {
         $shortDay = substr($row['day'], 0, 3);
         if (isset($weeklySales[$shortDay])) {
-            $weeklySales[$shortDay] = (float)$row['sales'];
+            $weeklySales[$shortDay] = (float) $row['sales'];
         }
     }
 }
@@ -85,17 +146,22 @@ $categories = [];
 $sql = "SELECT p.category AS name, SUM(oi.quantity * oi.unit_price) AS revenue
         FROM order_items oi
         JOIN products p ON oi.product_name = p.productName
+        JOIN customer_orders o ON oi.order_id = o.order_id
+        WHERE o.order_date BETWEEN ? AND ?
         GROUP BY p.category
         ORDER BY revenue DESC
         LIMIT 4";
-$result = $conn->query($sql);
+$stmt = $conn->prepare($sql);
+$stmt->bind_param('ss', $filterStartStr, $filterEndStr);
+$stmt->execute();
+$result = $stmt->get_result();
 if ($result && $result->num_rows > 0) {
     $totalCategoryRevenue = 0;
     while ($row = $result->fetch_assoc()) {
-        $totalCategoryRevenue += (float)$row['revenue'];
+        $totalCategoryRevenue += (float) $row['revenue'];
         $categories[] = [
             'name' => $row['name'],
-            'value' => (float)$row['revenue'],
+            'value' => (float) $row['revenue'],
             'color' => '#0d9488',
         ];
     }
@@ -107,35 +173,51 @@ if ($result && $result->num_rows > 0) {
             : 0;
     }
 }
+$stmt->close();
 
 $topProducts = [];
 $sql = "SELECT oi.product_name AS name, SUM(oi.quantity) AS units, SUM(oi.quantity * oi.unit_price) AS revenue
         FROM order_items oi
+        JOIN customer_orders o ON oi.order_id = o.order_id
+        WHERE o.order_date BETWEEN ? AND ?
         GROUP BY oi.product_name
         ORDER BY revenue DESC
         LIMIT 5";
-$result = $conn->query($sql);
+$stmt = $conn->prepare($sql);
+$stmt->bind_param('ss', $filterStartStr, $filterEndStr);
+$stmt->execute();
+$result = $stmt->get_result();
 if ($result) {
     while ($row = $result->fetch_assoc()) {
         $topProducts[] = [
             'name' => $row['name'],
-            'units' => (int)$row['units'],
-            'revenue' => (float)$row['revenue'],
+            'units' => (int) $row['units'],
+            'revenue' => (float) $row['revenue'],
         ];
     }
 }
+$stmt->close();
 
-$totalTopRevenue = array_sum(array_column($topProducts, 'revenue'));
 $totalSales = array_sum(array_column($monthlySales, 'sales'));
 $totalOrders = array_sum(array_column($monthlySales, 'orders'));
+
 $activeCustomers = 0;
-$result = $conn->query("SELECT COUNT(*) AS count FROM customers WHERE status = 'active'");
+$stmt = $conn->prepare("SELECT COUNT(DISTINCT customer_id) AS count FROM customer_orders WHERE order_date BETWEEN ? AND ?");
+$stmt->bind_param('ss', $filterStartStr, $filterEndStr);
+$stmt->execute();
+$result = $stmt->get_result();
 if ($result) {
     $row = $result->fetch_assoc();
-    $activeCustomers = (int)$row['count'];
+    $activeCustomers = (int) ($row['count'] ?? 0);
 }
-$avgOrderValue = $totalOrders > 0 ? $totalSales / $totalOrders : 0;
+$stmt->close();
 
+$pendingApprovals = 0;
+$result = $conn->query("SELECT COUNT(*) AS count FROM product_submissions WHERE status = 'Pending'");
+if ($result) {
+    $row = $result->fetch_assoc();
+    $pendingApprovals = (int) $row['count'];
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -162,9 +244,9 @@ $avgOrderValue = $totalOrders > 0 ? $totalSales / $totalOrders : 0;
 <div class="admin-layout">
     <aside class="sidebar">
         <div class="sidebar-header">
-            <button type="button" id="sidebarToggle" class="sidebar-toggle" aria-pressed="false" aria-label="Toggle sidebar">☰</button>
+            <button type="button" id="sidebarToggle" class="sidebar-toggle" aria-pressed="false" aria-label="Toggle sidebar">&#9776;</button>
             <div class="logo-circle">
-                <span class="logo-icon">⧉</span>
+                <img src="../logo-transparent.png" alt="Essen Pharmacy" class="logo-image">
             </div>
             <div class="sidebar-brand">
                 <div class="brand-title">Essen Pharmacy</div>
@@ -224,15 +306,16 @@ $avgOrderValue = $totalOrders > 0 ? $totalSales / $totalOrders : 0;
             <div class="analytics-header-top">
                 <div>
                     <h1>Analytics</h1>
-                    <p>Detailed insights into your store performance</p>
+                    <p>Detailed insights into your store performance.</p>
+                    <!-- <p>Showing data from <?php echo htmlspecialchars($filterStart->format('d/m/Y')); ?> to <?php echo htmlspecialchars($filterEnd->format('d/m/Y')); ?>.</p> -->
                 </div>
                 <div class="analytics-header-actions">
                     <button id="downloadCsv" class="btn-outline">
-                        <span class="btn-icon">⬇</span>
+                        <span class="btn-icon">&#11015;</span>
                         Export CSV
                     </button>
                     <button id="downloadPdf" class="btn-solid">
-                        <span class="btn-icon">⬇</span>
+                        <span class="btn-icon">&#11015;</span>
                         Export PDF
                     </button>
                 </div>
@@ -240,75 +323,63 @@ $avgOrderValue = $totalOrders > 0 ? $totalSales / $totalOrders : 0;
         </section>
 
         <section class="filter-card">
-            <div class="filter-grid">
+            <form method="get" action="analytics.php" class="filter-grid">
                 <div class="filter-group">
                     <label class="filter-label" for="preset-select">Quick Select</label>
-                    <select id="preset-select" class="filter-select">
-                        <option value="this-month">This Month</option>
-                        <option value="this-week">This Week</option>
-                        <option value="today">Today</option>
-                        <option value="this-quarter">This Quarter</option>
-                        <option value="this-year">This Year</option>
-                        <option value="custom">Custom Range</option>
+                    <select id="preset-select" name="preset" class="filter-select">
+                        <option value="this-month"<?php echo $selectedPreset === 'this-month' ? ' selected' : ''; ?>>This Month</option>
+                        <option value="this-week"<?php echo $selectedPreset === 'this-week' ? ' selected' : ''; ?>>This Week</option>
+                        <option value="today"<?php echo $selectedPreset === 'today' ? ' selected' : ''; ?>>Today</option>
+                        <option value="this-quarter"<?php echo $selectedPreset === 'this-quarter' ? ' selected' : ''; ?>>This Quarter</option>
+                        <option value="this-year"<?php echo $selectedPreset === 'this-year' ? ' selected' : ''; ?>>This Year</option>
+                        <option value="custom"<?php echo $selectedPreset === 'custom' ? ' selected' : ''; ?>>Custom Range</option>
                     </select>
                 </div>
                 <div class="filter-group">
                     <label class="filter-label" for="start-date">Start Date</label>
                     <div class="date-input-wrapper">
-                        <span class="calendar-icon">📅</span>
-                        <input id="start-date" type="date" class="filter-input" value="<?php echo date('Y-m-01'); ?>">
+                        <span class="calendar-icon">&#128197;</span>
+                        <input id="start-date" name="start" type="date" class="filter-input" value="<?php echo htmlspecialchars($filterStartStr); ?>">
                     </div>
                 </div>
                 <div class="filter-group">
                     <label class="filter-label" for="end-date">End Date</label>
                     <div class="date-input-wrapper">
-                        <span class="calendar-icon">📅</span>
-                        <input id="end-date" type="date" class="filter-input" value="<?php echo date('Y-m-t'); ?>">
+                        <span class="calendar-icon">&#128197;</span>
+                        <input id="end-date" name="end" type="date" class="filter-input" value="<?php echo htmlspecialchars($filterEndStr); ?>">
                     </div>
                 </div>
-                <button id="apply-filter" class="filter-apply-btn">Apply Filter</button>
-            </div>
+                <button id="apply-filter" type="submit" class="filter-apply-btn">Apply Filter</button>
+            </form>
         </section>
 
         <section class="analytics-metric-grid">
             <div class="metric-card">
                 <div class="metric-icon metric-icon-primary">$</div>
                 <div class="metric-main">
-                    <div class="metric-value">RM <?php echo number_format($totalSales, 0); ?></div>
+                    <div class="metric-value">RM <?php echo number_format($totalSales, 2); ?></div>
                     <div class="metric-label">Total Revenue</div>
-                    <div class="metric-change positive">
-                        <span>▲</span><span>+12.5% vs last period</span>
-                    </div>
                 </div>
             </div>
             <div class="metric-card">
-                <div class="metric-icon metric-icon-blue">🛒</div>
+                <div class="metric-icon metric-icon-blue">&#128722;</div>
                 <div class="metric-main">
                     <div class="metric-value"><?php echo number_format($totalOrders, 0); ?></div>
                     <div class="metric-label">Total Orders</div>
-                    <div class="metric-change positive">
-                        <span>▲</span><span>+8.2% vs last period</span>
-                    </div>
                 </div>
             </div>
             <div class="metric-card">
-                <div class="metric-icon metric-icon-green">👥</div>
+                <div class="metric-icon metric-icon-green">&#128101;</div>
                 <div class="metric-main">
                     <div class="metric-value"><?php echo number_format($activeCustomers, 0); ?></div>
                     <div class="metric-label">Active Customers</div>
-                    <div class="metric-change positive">
-                        <span>▲</span><span>+15.3% vs last period</span>
-                    </div>
                 </div>
             </div>
             <div class="metric-card">
-                <div class="metric-icon metric-icon-purple">Ⓥ</div>
+                <div class="metric-icon metric-icon-purple">&#9989;</div>
                 <div class="metric-main">
-                    <div class="metric-value">RM <?php echo number_format($avgOrderValue, 2); ?></div>
-                    <div class="metric-label">Avg Order Value</div>
-                    <div class="metric-change negative">
-                        <span>▼</span><span>-2.1% vs last period</span>
-                    </div>
+                    <div class="metric-value"><?php echo number_format($pendingApprovals, 0); ?></div>
+                    <div class="metric-label">Total Pending Approvals</div>
                 </div>
             </div>
         </section>
@@ -320,8 +391,8 @@ $avgOrderValue = $totalOrders > 0 ? $totalSales / $totalOrders : 0;
                 <button class="tab-pill" data-tab="products">Top Products</button>
             </div>
             <div class="chart-type-toggle">
-                <button class="chart-type-btn active" data-type="bar">📊 Bar</button>
-                <button class="chart-type-btn" data-type="line">📈 Line</button>
+                <button class="chart-type-btn active" data-type="bar">&#128202; Bar</button>
+                <button class="chart-type-btn" data-type="line">&#128200; Line</button>
             </div>
         </section>
 
@@ -329,7 +400,7 @@ $avgOrderValue = $totalOrders > 0 ? $totalSales / $totalOrders : 0;
             <div class="card analytics-card" data-panel="sales">
                 <div class="card-header">
                     <h2 class="analytics-card-title">Monthly Sales</h2>
-                    <p class="analytics-card-desc">Revenue performance over the past 6 months</p>
+                    <p class="analytics-card-desc">Revenue performance for the selected date range.</p>
                 </div>
                 <div class="chart-card-body">
                     <canvas id="monthlySalesChart"></canvas>
@@ -338,8 +409,8 @@ $avgOrderValue = $totalOrders > 0 ? $totalSales / $totalOrders : 0;
 
             <div class="card analytics-card" data-panel="sales">
                 <div class="card-header">
-                    <h2 class="analytics-card-title">Daily Sales (This Week)</h2>
-                    <p class="analytics-card-desc">Day-by-day sales breakdown</p>
+                    <h2 class="analytics-card-title">Daily Sales</h2>
+                    <p class="analytics-card-desc">Sales grouped by weekday for the selected date range.</p>
                 </div>
                 <div class="chart-card-body">
                     <canvas id="dailySalesChart"></canvas>
@@ -349,7 +420,7 @@ $avgOrderValue = $totalOrders > 0 ? $totalSales / $totalOrders : 0;
             <div class="card analytics-card" data-panel="categories" hidden>
                 <div class="card-header">
                     <h2 class="analytics-card-title">Sales by Category</h2>
-                    <p class="analytics-card-desc">Distribution of sales across product categories</p>
+                    <p class="analytics-card-desc">Distribution of sales across product categories.</p>
                 </div>
                 <div class="category-list">
                     <?php foreach ($categories as $category): ?>
@@ -369,7 +440,7 @@ $avgOrderValue = $totalOrders > 0 ? $totalSales / $totalOrders : 0;
             <div class="card analytics-card" data-panel="categories" hidden>
                 <div class="card-header">
                     <h2 class="analytics-card-title">Category Performance</h2>
-                    <p class="analytics-card-desc">Detailed breakdown by category</p>
+                    <p class="analytics-card-desc">Detailed breakdown by category.</p>
                 </div>
                 <div class="category-list">
                     <?php foreach ($categories as $category): ?>
@@ -384,7 +455,7 @@ $avgOrderValue = $totalOrders > 0 ? $totalSales / $totalOrders : 0;
             <div class="card analytics-card" data-panel="products" hidden>
                 <div class="card-header">
                     <h2 class="analytics-card-title">Top Selling Products</h2>
-                    <p class="analytics-card-desc">Products with highest sales volume</p>
+                    <p class="analytics-card-desc">Products with highest sales volume in the selected range.</p>
                 </div>
                 <div class="table-wrapper">
                     <table class="top-products-table">
@@ -394,19 +465,15 @@ $avgOrderValue = $totalOrders > 0 ? $totalSales / $totalOrders : 0;
                             <th>Product Name</th>
                             <th class="text-right">Units Sold</th>
                             <th class="text-right">Revenue</th>
-                            <th class="text-right">Share</th>
                         </tr>
                         </thead>
                         <tbody>
-                        <?php $rank = 1; foreach ($topProducts as $product):
-                            $share = $totalTopRevenue > 0 ? ($product['revenue'] / $totalTopRevenue) * 100 : 0;
-                            ?>
+                        <?php $rank = 1; foreach ($topProducts as $product): ?>
                             <tr>
                                 <td>#<?php echo $rank++; ?></td>
                                 <td><?php echo htmlspecialchars($product['name']); ?></td>
                                 <td class="text-right"><?php echo number_format($product['units'], 0); ?></td>
-                                <td class="text-right">RM <?php echo number_format($product['revenue'], 0); ?></td>
-                                <td class="text-right"><?php echo number_format($share, 1); ?>%</td>
+                                <td class="text-right">RM <?php echo number_format($product['revenue'], 2); ?></td>
                             </tr>
                         <?php endforeach; ?>
                         </tbody>
@@ -418,7 +485,6 @@ $avgOrderValue = $totalOrders > 0 ? $totalSales / $totalOrders : 0;
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" integrity="sha512-Oe0cCI9qhdAsV3Tw0s+zzlR2Td5W8yx197GbcnTJy5T6hN3eAm/FOm+8tIel/Qx5W2HJqQ8+EIx7aQGxQ7B/Yg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <script>
     const monthlySales = <?php echo json_encode($monthlySales); ?>;
     const dailySales = <?php echo json_encode($dailySales); ?>;
@@ -543,6 +609,7 @@ $avgOrderValue = $totalOrders > 0 ? $totalSales / $totalOrders : 0;
                 break;
             case 'this-month':
                 start = new Date(today.getFullYear(), today.getMonth(), 1);
+                end.setDate(new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate());
                 break;
             case 'this-quarter':
                 const quarter = Math.floor(today.getMonth() / 3);
@@ -558,10 +625,6 @@ $avgOrderValue = $totalOrders > 0 ? $totalSales / $totalOrders : 0;
 
         document.getElementById('start-date').value = start.toISOString().slice(0, 10);
         document.getElementById('end-date').value = end.toISOString().slice(0, 10);
-    });
-
-    document.getElementById('apply-filter').addEventListener('click', () => {
-        alert('Filter applied. Data is currently based on the dashboard summary and page load values.');
     });
 
     document.getElementById('downloadCsv').addEventListener('click', () => {
@@ -580,18 +643,87 @@ $avgOrderValue = $totalOrders > 0 ? $totalSales / $totalOrders : 0;
     });
 
     document.getElementById('downloadPdf').addEventListener('click', () => {
-        const { jsPDF } = window.jspdf;
-        const pdf = new jsPDF();
-        pdf.setFontSize(18);
-        pdf.text('Analytics Report', 20, 20);
-        pdf.setFontSize(12);
-        pdf.text(`Total Revenue: RM ${<?php echo number_format($totalSales, 0); ?>}`, 20, 32);
-        pdf.text(`Total Orders: ${<?php echo number_format($totalOrders, 0); ?>}`, 20, 40);
-        pdf.text(`Active Customers: ${<?php echo number_format($activeCustomers, 0); ?>}`, 20, 48);
-        pdf.text(`Avg Order Value: RM ${<?php echo number_format($avgOrderValue, 2); ?>}`, 20, 56);
-        pdf.save('analytics-report.pdf');
+        const printWindow = window.open('', '_blank', 'width=900,height=700');
+        if (!printWindow) {
+            alert('Please allow pop-ups to export the PDF.');
+            return;
+        }
+
+        const monthlyRows = monthlySales.map(item => `
+            <tr>
+                <td>${item.month}</td>
+                <td>RM ${Number(item.sales).toFixed(2)}</td>
+                <td>${item.orders}</td>
+                <td>${item.customers}</td>
+            </tr>
+        `).join('');
+
+        const reportHtml = `
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+                <meta charset="UTF-8">
+                <title>Analytics Report</title>
+                <style>
+                    body { font-family: Arial, sans-serif; margin: 32px; color: #0f172a; }
+                    h1 { margin: 0 0 8px; font-size: 28px; }
+                    p { margin: 0 0 18px; color: #475569; }
+                    .summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 24px 0 28px; }
+                    .summary-card { border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px 16px; }
+                    .summary-label { font-size: 13px; color: #64748b; margin-bottom: 6px; }
+                    .summary-value { font-size: 20px; font-weight: 700; }
+                    table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+                    th, td { border: 1px solid #e2e8f0; padding: 10px 12px; text-align: left; font-size: 14px; }
+                    th { background: #f8fafc; }
+                    @media print { body { margin: 20px; } }
+                </style>
+            </head>
+            <body>
+                <h1>Analytics Report</h1>
+                <p>Generated on ${new Date().toLocaleString()}</p>
+                <p>Showing data from <?php echo htmlspecialchars($filterStart->format('d/m/Y')); ?> to <?php echo htmlspecialchars($filterEnd->format('d/m/Y')); ?>.</p>
+                <div class="summary">
+                    <div class="summary-card">
+                        <div class="summary-label">Total Revenue</div>
+                        <div class="summary-value">RM <?php echo number_format($totalSales, 2); ?></div>
+                    </div>
+                    <div class="summary-card">
+                        <div class="summary-label">Total Orders</div>
+                        <div class="summary-value"><?php echo number_format($totalOrders, 0); ?></div>
+                    </div>
+                    <div class="summary-card">
+                        <div class="summary-label">Active Customers</div>
+                        <div class="summary-value"><?php echo number_format($activeCustomers, 0); ?></div>
+                    </div>
+                    <div class="summary-card">
+                        <div class="summary-label">Total Pending Approvals</div>
+                        <div class="summary-value"><?php echo number_format($pendingApprovals, 0); ?></div>
+                    </div>
+                </div>
+                <h2>Monthly Sales</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Month</th>
+                            <th>Sales</th>
+                            <th>Orders</th>
+                            <th>Customers</th>
+                        </tr>
+                    </thead>
+                    <tbody>${monthlyRows}</tbody>
+                </table>
+            </body>
+            </html>
+        `;
+
+        printWindow.document.open();
+        printWindow.document.write(reportHtml);
+        printWindow.document.close();
+        printWindow.focus();
+        printWindow.onload = function () {
+            printWindow.print();
+        };
     });
 </script>
 </body>
 </html>
-

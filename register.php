@@ -42,6 +42,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (empty($errors)) {
         $hashedPassword = password_hash($password, PASSWORD_BCRYPT);
         $role = 'customer';
+        $customerStatus = 'active';
 
         // Start transaction
         $conn->begin_transaction();
@@ -66,7 +67,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'INSERT INTO customers (user_id, customer_code, name, email, phone, status)
                  VALUES (?, ?, ?, ?, ?, ?)'
             );
-            $customerStmt->bind_param('isssss', $userId, $customerCode, $fullName, $email, $phoneNo, $role);
+            $customerStmt->bind_param('isssss', $userId, $customerCode, $fullName, $email, $phoneNo, $customerStatus);
             $customerStmt->execute();
             $customerStmt->close();
 
@@ -91,9 +92,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <div class="login-page">
     <div class="login-card">
         <div class="login-logo">
-            <div class="logo-circle">
-                <span class="logo-icon">⧉</span>
-            </div>
+            <img src="logo.png" alt="Essen Pharmacy" class="login-logo-image" width="54" height="54">
             <h1 class="app-title">Essen Pharmacy</h1>
             <p class="app-subtitle">CommerceGo Management Platform</p>
         </div>
@@ -208,4 +207,3 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 </div>
 </body>
 </html>
-

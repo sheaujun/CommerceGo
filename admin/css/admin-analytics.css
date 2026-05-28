@@ -67,15 +67,17 @@
 
 .filter-grid {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 18px;
+    grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr) minmax(220px, 1fr) 180px;
+    column-gap: 28px;
+    row-gap: 18px;
     align-items: end;
 }
 
 .filter-group {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 10px;
+    min-width: 0;
 }
 
 .filter-label {
@@ -86,11 +88,13 @@
 
 .filter-select,
 .filter-input {
-    padding: 12px 14px;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    padding: 12px 48px 12px 48px;
     border-radius: 999px;
     border: 1px solid #e5e7eb;
     font-size: 0.95rem;
-    min-width: 100%;
     background-color: #f8fafc;
 }
 
@@ -107,15 +111,18 @@
 }
 
 .filter-apply-btn {
-    justify-self: start;
-    padding: 12px 20px;
+    align-self: end;
+    justify-self: stretch;
+    padding: 12px 22px;
     border-radius: 999px;
     border: none;
     background-color: #eef2ff;
     color: #4f46e5;
     font-size: 0.95rem;
     cursor: pointer;
-    min-width: 140px;
+    width: 100%;
+    min-width: 180px;
+    white-space: nowrap;
 }
 
 .filter-apply-btn:hover {
@@ -133,6 +140,8 @@
 
 .date-input-wrapper {
     position: relative;
+    width: 100%;
+    max-width: 100%;
 }
 
 .analytics-metric-grid {
@@ -417,6 +426,7 @@
 
     .filter-grid {
         grid-template-columns: 1fr;
+        gap: 16px;
     }
 
     .analytics-header-actions,

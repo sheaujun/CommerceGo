@@ -19,6 +19,8 @@ $result = $conn->query($sql);
 $customers = [];
 if ($result) {
     while ($row = $result->fetch_assoc()) {
+        $normalizedStatus = strtolower(trim((string) ($row['status'] ?? '')));
+        $row['status'] = $normalizedStatus !== '' ? $normalizedStatus : 'inactive';
         $row['total_orders'] = (int)$row['total_orders'];
         $row['total_spent'] = (float)$row['total_spent'];
         $customers[] = $row;
@@ -69,7 +71,7 @@ $avgOrderValue = $totalOrders > 0 ? $totalRevenue / $totalOrders : 0.0;
         <div class="sidebar-header">
             <button type="button" id="sidebarToggle" class="sidebar-toggle" aria-pressed="false" aria-label="Toggle sidebar">☰</button>
             <div class="logo-circle">
-                <span class="logo-icon">⧉</span>
+                <img src="../logo-transparent.png" alt="Essen Pharmacy" class="logo-image">
             </div>
             <div class="sidebar-brand">
                 <div class="brand-title">Essen Pharmacy</div>
@@ -168,10 +170,6 @@ $avgOrderValue = $totalOrders > 0 ? $totalRevenue / $totalOrders : 0.0;
                 <div>
                     <h2>Customer List</h2>
                 </div>
-                <div class="search-wrapper">
-                    <span class="search-icon">🔍</span>
-                    <input id="customer-search" type="text" placeholder="Search customers...">
-                </div>
             </div>
 
             <div class="table-scroll">
@@ -190,7 +188,7 @@ $avgOrderValue = $totalOrders > 0 ? $totalRevenue / $totalOrders : 0.0;
                     </thead>
                     <tbody id="customer-table-body">
                         <?php foreach ($customers as $customer): ?>
-                            <tr data-search="<?php echo htmlspecialchars(strtolower($customer['customer_code'] . ' ' . $customer['name'] . ' ' . $customer['email'])); ?>">
+                            <tr data-search="<?php echo htmlspecialchars(strtolower($customer['customer_code'] . ' ' . $customer['name'] . ' ' . $customer['email'] . ' ' . $customer['phone'])); ?>">
                                 <td class="font-medium"><?php echo htmlspecialchars($customer['customer_code']); ?></td>
                                 <td><?php echo htmlspecialchars($customer['name']); ?></td>
                                 <td><?php echo htmlspecialchars($customer['email']); ?></td>
@@ -288,13 +286,15 @@ const modalFields = {
     status: document.getElementById('modal-status'),
 };
 
-searchInput.addEventListener('input', () => {
-    const query = searchInput.value.trim().toLowerCase();
-    Array.from(tableBody.querySelectorAll('tr')).forEach(row => {
-        const text = row.dataset.search || '';
-        row.style.display = text.includes(query) ? '' : 'none';
+if (searchInput && tableBody) {
+    searchInput.addEventListener('input', () => {
+        const query = searchInput.value.trim().toLowerCase();
+        Array.from(tableBody.querySelectorAll('tr')).forEach(row => {
+            const text = row.dataset.search || '';
+            row.style.display = text.includes(query) ? '' : 'none';
+        });
     });
-});
+}
 
 const openCustomerModal = (customerId) => {
     const customer = customers.find(c => Number(c.customer_id) === Number(customerId));

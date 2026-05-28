@@ -61,9 +61,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <div class="login-page">
     <div class="login-card">
         <div class="login-logo">
-            <div class="logo-circle">
-                <span class="logo-icon">⧉</span>
-            </div>
+            <img src="logo.png" alt="Essen Pharmacy" class="login-logo-image" width="54" height="54">
             <h1 class="app-title">Essen Pharmacy</h1>
             <p class="app-subtitle">CommerceGo Management Platform</p>
         </div>

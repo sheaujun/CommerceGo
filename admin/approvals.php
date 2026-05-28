@@ -197,7 +197,7 @@ $countStmt->close();
         <div class="sidebar-header">
             <button type="button" id="sidebarToggle" class="sidebar-toggle" aria-pressed="false" aria-label="Toggle sidebar">☰</button>
             <div class="logo-circle">
-                <span class="logo-icon">⧉</span>
+                <img src="../logo-transparent.png" alt="Essen Pharmacy" class="logo-image">
             </div>
             <div class="sidebar-brand">
                 <div class="brand-title">Essen Pharmacy</div>
@@ -358,7 +358,7 @@ $countStmt->close();
                                     <span class="badge-category"><?php echo htmlspecialchars($displayCategory); ?></span>
                                 </div>
                                 <div class="approval-card-meta">
-                                    <span>$<?php echo number_format($submission['price'], 2); ?></span>
+                                    <span>RM<?php echo number_format($submission['price'], 2); ?></span>
                                     <span><?php echo (int)$submission['stockQuantity']; ?> units</span>
                                     <span>Exp: <?php echo htmlspecialchars(formatDate($submission['expiryDate'])); ?></span>
                                     <span>Submitted: <?php echo htmlspecialchars(formatDateTime($submission['created_at'])); ?></span>

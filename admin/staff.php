@@ -249,7 +249,7 @@ $stmt->close();
         <div class="sidebar-header">
             <button type="button" id="sidebarToggle" class="sidebar-toggle" aria-pressed="false" aria-label="Toggle sidebar">☰</button>
             <div class="logo-circle">
-                <span class="logo-icon">⧉</span>
+                <img src="../logo-transparent.png" alt="Essen Pharmacy" class="logo-image">
             </div>
             <div class="sidebar-brand">
                 <div class="brand-title">Essen Pharmacy</div>

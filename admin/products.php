@@ -1,14 +1,47 @@
 <?php
 session_start();
 require_once __DIR__ . '/../db.php';
+require_once __DIR__ . '/../includes/product-import.php';
+require_once __DIR__ . '/../includes/product-expiry.php';
 
 if (!isset($_SESSION['userID']) || ($_SESSION['role'] ?? '') !== 'admin') {
     header('Location: ../login.php');
     exit;
 }
 
-$errors = [];
-$success = '';
+disableExpiredProducts($conn);
+
+$errors = $_SESSION['flash_errors'] ?? [];
+$success = $_SESSION['flash_success'] ?? '';
+unset($_SESSION['flash_errors'], $_SESSION['flash_success']);
+
+function redirectWithImportMessage(string $success = '', array $errors = []): void
+{
+    $_SESSION['flash_success'] = $success;
+    $_SESSION['flash_errors'] = $errors;
+    header('Location: products.php');
+    exit;
+}
+
+// Handle product spreadsheet import
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'import_products') {
+    $importStarted = false;
+    try {
+        $productsToImport = productsFromUploadedSpreadsheet($_FILES['product_import_file'] ?? []);
+        $conn->begin_transaction();
+        $importStarted = true;
+        $importedCount = insertProducts($conn, $productsToImport);
+        $conn->commit();
+        $success = $importedCount . ' product' . ($importedCount === 1 ? '' : 's') . ' imported successfully.';
+        redirectWithImportMessage($success);
+    } catch (Throwable $e) {
+        if ($importStarted) {
+            $conn->rollback();
+        }
+        $errors[] = $e->getMessage();
+        redirectWithImportMessage('', $errors);
+    }
+}
 
 // Handle add product
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_product') {
@@ -18,7 +51,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_p
     $category    = trim($_POST['category'] ?? '');
     $price       = (float)($_POST['price'] ?? 0);
     $stock       = (int)($_POST['stock'] ?? 0);
-    $productType = $_POST['product_type'] ?? 'Both';
+    $productType = 'Both';
     $status      = $_POST['status'] === 'Inactive' ? 'Inactive' : 'Active';
     $compliance  = $_POST['compliance'] ?? 'Pending';
     $expiryDate  = $_POST['expiry_date'] ?? null;
@@ -67,6 +100,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_p
     }
 
     if (empty($errors)) {
+        $physicalStock = $stock;
+        $onlineStock = $stock;
         $stmt = $conn->prepare(
             'INSERT INTO products (productName, productDescription, category, price, stockQuantity, physicalStock, onlineStock, productType, complianceStatus, status, imagePath, expiryDate)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
@@ -78,8 +113,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_p
             $category,
             $price,
             $stock,
-            $stock,
-            $stock,
+            $physicalStock,
+            $onlineStock,
             $productType,
             $compliance,
             $status,
@@ -105,7 +140,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'edit_
     $category    = trim($_POST['edit_category'] ?? '');
     $price       = (float)($_POST['edit_price'] ?? 0);
     $stock       = (int)($_POST['edit_stock'] ?? 0);
-    $productType = $_POST['edit_product_type'] ?? 'Both';
+    $productType = 'Both';
     $status      = $_POST['edit_status'] === 'Inactive' ? 'Inactive' : 'Active';
     $compliance  = $_POST['edit_compliance'] ?? 'Pending';
     $expiryDate  = $_POST['edit_expiry_date'] ?? null;
@@ -158,6 +193,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'edit_
     }
 
     if (empty($errors) && $productId > 0) {
+        $physicalStock = $stock;
+        $onlineStock = $stock;
         $stmt = $conn->prepare(
             'UPDATE products
              SET productName = ?, productDescription = ?, category = ?, price = ?, stockQuantity = ?,
@@ -172,8 +209,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'edit_
             $category,
             $price,
             $stock,
-            $stock,
-            $stock,
+            $physicalStock,
+            $onlineStock,
             $productType,
             $compliance,
             $status,
@@ -211,6 +248,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
 // List and filters
 $search    = trim($_GET['q'] ?? '');
 $categoryF = trim($_GET['cat'] ?? '');
+$perPage = 10;
+$page = max(1, (int)($_GET['page'] ?? 1));
 $where     = '1=1';
 $params    = [];
 $types     = '';
@@ -229,20 +268,45 @@ if ($categoryF !== '' && $categoryF !== 'All') {
     $types .= 's';
 }
 
+$countSql = "SELECT COUNT(*) AS total FROM products WHERE $where";
+$countStmt = $conn->prepare($countSql);
+if (!empty($params)) {
+    $countStmt->bind_param($types, ...$params);
+}
+$countStmt->execute();
+$countResult = $countStmt->get_result();
+$totalProducts = (int)($countResult->fetch_assoc()['total'] ?? 0);
+$countStmt->close();
+
+$totalPages = max(1, (int)ceil($totalProducts / $perPage));
+if ($page > $totalPages) {
+    $page = $totalPages;
+}
+$offset = ($page - 1) * $perPage;
+
 $sql = "SELECT productID, productName, productDescription, category, price, stockQuantity, productType,
                complianceStatus, status, imagePath, expiryDate
         FROM products
         WHERE $where
-        ORDER BY productName ASC";
+        ORDER BY productName ASC
+        LIMIT ? OFFSET ?";
 
 $stmt = $conn->prepare($sql);
-if (!empty($params)) {
-    $stmt->bind_param($types, ...$params);
-}
+$queryParams = array_merge($params, [$perPage, $offset]);
+$queryTypes = $types . 'ii';
+$stmt->bind_param($queryTypes, ...$queryParams);
 $stmt->execute();
 $result = $stmt->get_result();
 $products = $result->fetch_all(MYSQLI_ASSOC);
 $stmt->close();
+
+$pageBaseParams = [];
+if ($search !== '') {
+    $pageBaseParams['q'] = $search;
+}
+if ($categoryF !== '' && $categoryF !== 'All') {
+    $pageBaseParams['cat'] = $categoryF;
+}
 
 // For category filter options
 $catResult = $conn->query('SELECT DISTINCT category FROM products ORDER BY category ASC');
@@ -268,7 +332,7 @@ $categories = $catResult ? $catResult->fetch_all(MYSQLI_ASSOC) : [];
             });
         });
     </script>
-    <link rel="stylesheet" href="css/admin-products.css">
+    <link rel="stylesheet" href="css/admin-products.css?v=2">
 </head>
 <body>
 <div class="admin-layout">
@@ -276,7 +340,7 @@ $categories = $catResult ? $catResult->fetch_all(MYSQLI_ASSOC) : [];
         <div class="sidebar-header">
             <button type="button" id="sidebarToggle" class="sidebar-toggle" aria-pressed="false" aria-label="Toggle sidebar">☰</button>
             <div class="logo-circle">
-                <span class="logo-icon">⧉</span>
+                <img src="../logo-transparent.png" alt="Essen Pharmacy" class="logo-image">
             </div>
             <div class="sidebar-brand">
                 <div class="brand-title">Essen Pharmacy</div>
@@ -354,9 +418,24 @@ $categories = $catResult ? $catResult->fetch_all(MYSQLI_ASSOC) : [];
             </div>
         <?php endif; ?>
 
+        <section class="product-import-card">
+            <div>
+                <h2>Import Products</h2>
+                <p>Upload .xlsx or .csv with columns: productName, description, category, price, stock, imagePath, expiryDate, status, compliance.</p>
+            </div>
+            <form method="post" action="products.php" enctype="multipart/form-data" class="product-import-form">
+                <input type="hidden" name="action" value="import_products">
+                <input type="file" name="product_import_file" accept=".xlsx,.csv" required>
+                <button type="submit" class="btn-primary">Import File</button>
+            </form>
+        </section>
+
         <div class="product-search-row">
             <div class="product-search-card">
                 <form method="get" action="products.php">
+                    <?php if ($categoryF !== '' && $categoryF !== 'All'): ?>
+                        <input type="hidden" name="cat" value="<?php echo htmlspecialchars($categoryF); ?>">
+                    <?php endif; ?>
                     <input
                         type="text"
                         name="q"
@@ -368,6 +447,9 @@ $categories = $catResult ? $catResult->fetch_all(MYSQLI_ASSOC) : [];
             </div>
             <div class="product-filter-card">
                 <form method="get" action="products.php">
+                    <?php if ($search !== ''): ?>
+                        <input type="hidden" name="q" value="<?php echo htmlspecialchars($search); ?>">
+                    <?php endif; ?>
                     <select name="cat" class="product-filter-select" onchange="this.form.submit()">
                         <option value="All">All Categories</option>
                         <?php foreach ($categories as $cat): ?>
@@ -384,12 +466,13 @@ $categories = $catResult ? $catResult->fetch_all(MYSQLI_ASSOC) : [];
         <div class="product-list-card">
             <div class="product-list-header">
                 <h2>All Products</h2>
-                <div class="product-count">(<?php echo count($products); ?>)</div>
+                <div class="product-count">(<?php echo $totalProducts; ?>)</div>
             </div>
 
             <table class="product-table">
                 <thead>
                 <tr>
+                    <th class="product-number-col">No.</th>
                     <th>Product</th>
                     <th>Category</th>
                     <th>Price</th>
@@ -402,11 +485,12 @@ $categories = $catResult ? $catResult->fetch_all(MYSQLI_ASSOC) : [];
                 <tbody>
                 <?php if (empty($products)): ?>
                     <tr>
-                        <td colspan="7">No products found.</td>
+                        <td colspan="8">No products found.</td>
                     </tr>
                 <?php else: ?>
-                    <?php foreach ($products as $p): ?>
+                    <?php foreach ($products as $index => $p): ?>
                         <tr>
+                            <td class="product-number"><?php echo $offset + $index + 1; ?></td>
                             <td>
                                 <div class="product-main">
                                     <div class="product-thumb">
@@ -428,7 +512,7 @@ $categories = $catResult ? $catResult->fetch_all(MYSQLI_ASSOC) : [];
                                 <span class="badge-category"><?php echo htmlspecialchars($p['category']); ?></span>
                             </td>
                             <td>
-                                <span class="product-price">$<?php echo number_format($p['price'], 2); ?></span>
+                                <span class="product-price">RM <?php echo number_format($p['price'], 2); ?></span>
                             </td>
                             <td>
                                 <?php if ($p['stockQuantity'] <= 50): ?>
@@ -463,7 +547,6 @@ $categories = $catResult ? $catResult->fetch_all(MYSQLI_ASSOC) : [];
                                      data-category="<?php echo htmlspecialchars($p['category']); ?>"
                                      data-price="<?php echo htmlspecialchars($p['price']); ?>"
                                      data-stock="<?php echo htmlspecialchars($p['stockQuantity']); ?>"
-                                     data-product-type="<?php echo htmlspecialchars($p['productType'] ?? 'Both'); ?>"
                                      data-status="<?php echo htmlspecialchars($p['status']); ?>"
                                      data-compliance="<?php echo htmlspecialchars($p['complianceStatus']); ?>"
                                      data-expiry="<?php echo htmlspecialchars($p['expiryDate'] ?? ''); ?>">
@@ -483,6 +566,22 @@ $categories = $catResult ? $catResult->fetch_all(MYSQLI_ASSOC) : [];
                 <?php endif; ?>
                 </tbody>
             </table>
+            <?php if ($totalPages > 1): ?>
+                <div class="pagination">
+                    <?php
+                    $prevParams = array_merge($pageBaseParams, ['page' => max(1, $page - 1)]);
+                    $nextParams = array_merge($pageBaseParams, ['page' => min($totalPages, $page + 1)]);
+                    ?>
+                    <a class="pagination-link <?php echo $page <= 1 ? 'disabled' : ''; ?>" href="?<?php echo htmlspecialchars(http_build_query($prevParams)); ?>">Previous</a>
+                    <div class="pagination-pages">
+                        <?php for ($i = 1; $i <= $totalPages; $i++): ?>
+                            <?php $pageParams = array_merge($pageBaseParams, ['page' => $i]); ?>
+                            <a class="pagination-page <?php echo $i === $page ? 'active' : ''; ?>" href="?<?php echo htmlspecialchars(http_build_query($pageParams)); ?>"><?php echo $i; ?></a>
+                        <?php endfor; ?>
+                    </div>
+                    <a class="pagination-link <?php echo $page >= $totalPages ? 'disabled' : ''; ?>" href="?<?php echo htmlspecialchars(http_build_query($nextParams)); ?>">Next</a>
+                </div>
+            <?php endif; ?>
         </div>
     </main>
 </div>
@@ -530,7 +629,7 @@ $categories = $catResult ? $catResult->fetch_all(MYSQLI_ASSOC) : [];
                         </select>
                     </div>
                     <div class="product-modal-field">
-                        <label class="product-modal-label" for="price">Price ($)</label>
+                        <label class="product-modal-label" for="price">Price (RM)</label>
                         <input type="number" step="0.01" min="0" id="price" name="price" class="product-modal-input" required>
                     </div>
                 </div>
@@ -543,17 +642,6 @@ $categories = $catResult ? $catResult->fetch_all(MYSQLI_ASSOC) : [];
                     <div class="product-modal-field">
                         <label class="product-modal-label" for="expiry_date">Expiry Date</label>
                         <input type="date" id="expiry_date" name="expiry_date" class="product-modal-input">
-                    </div>
-                </div>
-
-                <div class="product-modal-grid">
-                    <div class="product-modal-field">
-                        <label class="product-modal-label" for="product_type">Product Type</label>
-                        <select id="product_type" name="product_type" class="product-modal-select">
-                            <option value="Physical">Physical</option>
-                            <option value="Online">Online</option>
-                            <option value="Both" selected>Both</option>
-                        </select>
                     </div>
                 </div>
 
@@ -627,7 +715,7 @@ $categories = $catResult ? $catResult->fetch_all(MYSQLI_ASSOC) : [];
                         </select>
                     </div>
                     <div class="product-modal-field">
-                        <label class="product-modal-label" for="edit_price">Price ($)</label>
+                        <label class="product-modal-label" for="edit_price">Price (RM)</label>
                         <input type="number" step="0.01" min="0" id="edit_price" name="edit_price" class="product-modal-input" required>
                     </div>
                 </div>
@@ -640,17 +728,6 @@ $categories = $catResult ? $catResult->fetch_all(MYSQLI_ASSOC) : [];
                     <div class="product-modal-field">
                         <label class="product-modal-label" for="edit_expiry_date">Expiry Date</label>
                         <input type="date" id="edit_expiry_date" name="edit_expiry_date" class="product-modal-input">
-                    </div>
-                </div>
-
-                <div class="product-modal-grid">
-                    <div class="product-modal-field">
-                        <label class="product-modal-label" for="edit_product_type">Product Type</label>
-                        <select id="edit_product_type" name="edit_product_type" class="product-modal-select">
-                            <option value="Physical">Physical</option>
-                            <option value="Online">Online</option>
-                            <option value="Both">Both</option>
-                        </select>
                     </div>
                 </div>
 
@@ -795,7 +872,6 @@ $categories = $catResult ? $catResult->fetch_all(MYSQLI_ASSOC) : [];
     const editPrice = document.getElementById('edit_price');
     const editStock = document.getElementById('edit_stock');
     const editExpiryDate = document.getElementById('edit_expiry_date');
-    const editProductType = document.getElementById('edit_product_type');
     const editStatus = document.getElementById('edit_status');
     const editCompliance = document.getElementById('edit_compliance');
 
@@ -837,7 +913,6 @@ $categories = $catResult ? $catResult->fetch_all(MYSQLI_ASSOC) : [];
             editCategory.value = container.getAttribute('data-category') || 'Medication';
             editPrice.value = container.getAttribute('data-price') || '0';
             editStock.value = container.getAttribute('data-stock') || '0';
-            editProductType.value = container.getAttribute('data-product-type') || 'Both';
             editExpiryDate.value = container.getAttribute('data-expiry') || '';
             editStatus.value = container.getAttribute('data-status') || 'Active';
             editCompliance.value = container.getAttribute('data-compliance') || 'Approved';
