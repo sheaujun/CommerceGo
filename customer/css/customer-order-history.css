@@ -1,0 +1,402 @@
+:root {
+    color-scheme: light;
+}
+
+.history-panel {
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+    border-radius: 28px;
+    padding: 32px;
+    min-height: calc(100vh - 36px);
+}
+
+.history-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.95fr);
+    gap: 24px;
+    align-items: start;
+}
+
+.history-list {
+    display: grid;
+    gap: 18px;
+}
+
+.history-card,
+.history-detail-card,
+.history-empty {
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+    border-radius: 24px;
+    box-shadow: 0 18px 38px rgba(15, 23, 42, 0.06);
+}
+
+.history-card {
+    display: block;
+    text-decoration: none;
+    color: inherit;
+    padding: 24px;
+    transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.history-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 24px 42px rgba(67, 56, 202, 0.12);
+}
+
+.history-card.active {
+    border-color: #4338ca;
+    background: linear-gradient(180deg, #ffffff 0%, #f7f7ff 100%);
+}
+
+.history-card-top,
+.detail-header,
+.payment-box,
+.detail-row,
+.detail-total {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 14px;
+}
+
+.history-card-top h3,
+.detail-header h3 {
+    margin: 0;
+    font-size: 1.1rem;
+    color: #111827;
+}
+
+.history-card-top p,
+.detail-date,
+.detail-label,
+.payment-note,
+.detail-box p,
+.cancelled-state p {
+    margin: 0;
+    color: #6b7280;
+}
+
+.history-card-top p,
+.detail-date {
+    margin-top: 6px;
+    font-size: 0.92rem;
+}
+
+.history-badges {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.history-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 12px;
+    border-radius: 999px;
+    font-size: 0.82rem;
+    font-weight: 700;
+    border: 1px solid transparent;
+    white-space: nowrap;
+}
+
+.badge-icon {
+    font-size: 0.9rem;
+}
+
+.status-pending {
+    background: #fff7ed;
+    color: #c2410c;
+    border-color: #fdba74;
+}
+
+.status-processing {
+    background: #eef2ff;
+    color: #4338ca;
+    border-color: #a5b4fc;
+}
+
+.status-shipped {
+    background: #eff6ff;
+    color: #1d4ed8;
+    border-color: #93c5fd;
+}
+
+.status-delivered {
+    background: #ecfdf5;
+    color: #047857;
+    border-color: #86efac;
+}
+
+.status-cancelled {
+    background: #fef2f2;
+    color: #b91c1c;
+    border-color: #fca5a5;
+}
+
+.payment-paid {
+    background: #ecfdf5;
+    color: #047857;
+    border-color: #86efac;
+}
+
+.payment-pending {
+    background: #fff7ed;
+    color: #c2410c;
+    border-color: #fdba74;
+}
+
+.history-card-meta {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 18px;
+    color: #4b5563;
+    font-size: 0.95rem;
+}
+
+.meta-divider {
+    width: 1px;
+    height: 16px;
+    background: #d1d5db;
+}
+
+.history-link-copy {
+    display: inline-flex;
+    margin-top: 18px;
+    color: #4338ca;
+    font-weight: 700;
+}
+
+.history-detail {
+    position: sticky;
+    top: 18px;
+}
+
+.history-detail-card {
+    padding: 24px;
+}
+
+.detail-label {
+    font-size: 0.8rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+.timeline-card,
+.detail-section {
+    margin-top: 24px;
+}
+
+.timeline-card h4,
+.detail-section h4 {
+    margin: 0 0 14px;
+    font-size: 1rem;
+    color: #111827;
+}
+
+.timeline {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.timeline-step {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+}
+
+.timeline-node {
+    width: 42px;
+    height: 42px;
+    border-radius: 999px;
+    background: #e5e7eb;
+    color: #6b7280;
+    display: grid;
+    place-items: center;
+    font-size: 1rem;
+}
+
+.timeline-node.complete {
+    background: #4338ca;
+    color: #ffffff;
+}
+
+.timeline-label {
+    font-size: 0.8rem;
+    color: #6b7280;
+}
+
+.timeline-label.complete {
+    color: #111827;
+    font-weight: 700;
+}
+
+.timeline-line {
+    flex: 1;
+    min-width: 26px;
+    height: 3px;
+    border-radius: 999px;
+    background: #e5e7eb;
+}
+
+.timeline-line.complete {
+    background: #4338ca;
+}
+
+.cancelled-state {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    padding: 18px;
+    border-radius: 18px;
+    background: #fef2f2;
+    color: #991b1b;
+}
+
+.cancelled-icon {
+    font-size: 1.5rem;
+    line-height: 1;
+}
+
+.detail-grid {
+    display: grid;
+    gap: 18px;
+}
+
+.detail-box {
+    border: 1px solid #e5e7eb;
+    border-radius: 18px;
+    padding: 18px;
+    background: #f8fafc;
+}
+
+.detail-row {
+    padding: 10px 0;
+    border-bottom: 1px solid #e5e7eb;
+    font-size: 0.95rem;
+    color: #111827;
+}
+
+.detail-row:first-child {
+    padding-top: 0;
+}
+
+.detail-row:last-of-type {
+    border-bottom: none;
+    padding-bottom: 4px;
+}
+
+.detail-row div {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.detail-row span {
+    color: #6b7280;
+}
+
+.detail-total {
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px solid #d1d5db;
+    font-size: 1rem;
+    color: #111827;
+}
+
+.address-name,
+.payment-method {
+    font-weight: 700;
+    color: #111827;
+}
+
+.payment-box {
+    align-items: center;
+}
+
+.history-empty {
+    text-align: center;
+    padding: 64px 32px;
+}
+
+.history-empty-icon {
+    font-size: 3.6rem;
+    color: #4338ca;
+    margin-bottom: 16px;
+}
+
+.history-empty h3 {
+    margin: 0 0 10px;
+    font-size: 1.6rem;
+    color: #111827;
+}
+
+.history-empty p {
+    margin: 0 0 24px;
+    color: #6b7280;
+}
+
+.history-primary-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 12px 22px;
+    border-radius: 16px;
+    background: #4338ca;
+    color: #ffffff;
+    font-weight: 700;
+    text-decoration: none;
+}
+
+.history-primary-button:hover {
+    background: #312e81;
+}
+
+@media (max-width: 1100px) {
+    .history-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .history-detail {
+        position: static;
+    }
+}
+
+@media (max-width: 720px) {
+    .history-panel {
+        padding: 24px 16px;
+    }
+
+    .history-card,
+    .history-detail-card,
+    .history-empty {
+        padding: 20px;
+    }
+
+    .history-card-top,
+    .detail-header,
+    .payment-box {
+        flex-direction: column;
+    }
+
+    .history-badges {
+        justify-content: flex-start;
+    }
+
+    .timeline {
+        align-items: flex-start;
+        gap: 12px;
+    }
+
+    .timeline-line {
+        min-width: 18px;
+    }
+}
