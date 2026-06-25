@@ -283,6 +283,21 @@
     color: #6b7280;
 }
 
+.product-barcode-preview {
+    margin-top: 6px;
+    max-width: 180px;
+    padding: 4px 6px;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    background: #ffffff;
+}
+
+.product-barcode-preview img {
+    display: block;
+    width: 100%;
+    height: auto;
+}
+
 .badge-category {
     display: inline-flex;
     padding: 3px 8px;

@@ -2,15 +2,27 @@
 session_start();
 require_once __DIR__ . '/../db.php';
 require_once __DIR__ . '/../includes/product-import.php';
+require_once __DIR__ . '/../includes/product-schema.php';
 
 if (!isset($_SESSION['userID']) || ($_SESSION['role'] ?? '') !== 'staff') {
     header('Location: login.php');
     exit;
 }
 
-$errors = [];
-$success = '';
+$errors = $_SESSION['flash_errors'] ?? [];
+$success = $_SESSION['flash_success'] ?? '';
+unset($_SESSION['flash_errors'], $_SESSION['flash_success']);
+
+function redirectWithImportMessage(string $success = '', array $errors = []): void
+{
+    $_SESSION['flash_success'] = $success;
+    $_SESSION['flash_errors'] = $errors;
+    header('Location: add-product.php');
+    exit;
+}
+
 $userId = (int) $_SESSION['userID'];
+ensureProductBarcodeSchema($conn);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'import_product_submissions') {
     $importStarted = false;
@@ -21,16 +33,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'impor
         $importedCount = insertProductSubmissions($conn, $productsToImport, $userId);
         $conn->commit();
         $success = $importedCount . ' product submission' . ($importedCount === 1 ? '' : 's') . ' imported for admin approval.';
+        redirectWithImportMessage($success);
     } catch (Throwable $e) {
         if ($importStarted) {
             $conn->rollback();
         }
         $errors[] = $e->getMessage();
+        redirectWithImportMessage('', $errors);
     }
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') !== 'import_product_submissions') {
     $productName = trim($_POST['product_name'] ?? '');
+    $barcode = normalizeBarcode($_POST['barcode'] ?? '');
     $productDescription = trim($_POST['description'] ?? '');
     $category = trim($_POST['category'] ?? 'Medication');
     $price = (float)($_POST['price'] ?? 0);
@@ -73,11 +88,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') !== 'impor
     if ($productName === '') {
         $errors[] = 'Product name is required.';
     }
+    if ($barcode === '') {
+        $errors[] = 'Barcode is required for POS scanning.';
+    } elseif (productBarcodeExists($conn, $barcode) || pendingSubmissionBarcodeExists($conn, $barcode)) {
+        $errors[] = 'This barcode is already assigned to another product or pending submission.';
+    }
     if ($price <= 0) {
         $errors[] = 'Price must be greater than zero.';
     }
     if ($expiryDate === '') {
         $errors[] = 'Expiry date is required.';
+    }
+
+    if (empty($errors)) {
+        try {
+            $barcodeImagePath = saveBarcodeImage($barcode);
+        } catch (Throwable $e) {
+            $errors[] = 'Unable to generate barcode image. Please try again.';
+        }
     }
 
     if (empty($errors)) {
@@ -91,16 +119,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') !== 'impor
 
         $stmt = $conn->prepare(
             'INSERT INTO product_submissions
-             (submissionID, userID, productName, productDescription, category, price, stockQuantity, imagePath, expiryDate, status)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)' 
+             (submissionID, userID, productName, barcode, barcodeImagePath, productDescription, category, price, stockQuantity, imagePath, expiryDate, status)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)' 
         );
 
         $status = 'Pending';
         $stmt->bind_param(
-            'iisssdisss',
+            'iisssssdisss',
             $nextId,
             $userId,
             $productName,
+            $barcode,
+            $barcodeImagePath,
             $productDescription,
             $category,
             $price,
@@ -112,7 +142,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') !== 'impor
 
         if ($stmt->execute()) {
             $success = 'Product submitted for admin approval.';
-            $productName = $productDescription = $imagePath = '';
+            $productName = $barcode = $productDescription = $imagePath = '';
             $category = 'Medication';
             $price = 0;
             $stockQuantity = 0;
@@ -125,7 +155,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') !== 'impor
 }
 
 $submissionsStmt = $conn->prepare(
-    'SELECT submissionID, productName, category, price, stockQuantity, imagePath, expiryDate, status, rejectionReason, created_at
+    'SELECT submissionID, productName, barcode, category, price, stockQuantity, imagePath, expiryDate, status, rejectionReason, created_at
      FROM product_submissions
      WHERE userID = ?
      ORDER BY created_at DESC'
@@ -135,6 +165,20 @@ $submissionsStmt->execute();
 $submissionsResult = $submissionsStmt->get_result();
 $submissions = $submissionsResult->fetch_all(MYSQLI_ASSOC);
 $submissionsStmt->close();
+
+// A submitted category is retained in the suggestions, even while it is waiting for approval.
+$categoryNames = ['Medication', 'Supplements', 'Personal Care', 'Equipment'];
+$categoryResult = $conn->query('SELECT category FROM products UNION SELECT category FROM product_submissions ORDER BY category ASC');
+if ($categoryResult) {
+    while ($categoryRow = $categoryResult->fetch_assoc()) {
+        $categoryName = trim((string) ($categoryRow['category'] ?? ''));
+        if ($categoryName !== '' && !in_array(strtolower($categoryName), array_map('strtolower', $categoryNames), true)) {
+            $categoryNames[] = $categoryName;
+        }
+    }
+}
+natcasesort($categoryNames);
+$categoryNames = array_values($categoryNames);
 
 function formatDateTime($dateTimeString)
 {
@@ -162,7 +206,7 @@ function formatDateTime($dateTimeString)
                 <span class="toggle-icon">☰</span>
             </button>
             <div class="logo-circle">
-                <img src="../EssenPharmacy.png" alt="Essen Pharmacy" class="logo-image">
+                <img src="../logo-transparent.png" alt="Essen Pharmacy" class="logo-image">
             </div>
             <div class="sidebar-brand">
                 <div class="brand-title">Essen Pharmacy</div>
@@ -172,7 +216,7 @@ function formatDateTime($dateTimeString)
         <nav class="sidebar-nav">
             <a href="dashboard.php" class="nav-item">
                 <span class="nav-icon">🏠</span>
-                <span class="nav-label">Inventory Sync</span>
+                <span class="nav-label">Dashboard</span>
             </a>
             <a href="add-product.php" class="nav-item active">
                 <span class="nav-icon">➕</span>
@@ -181,6 +225,10 @@ function formatDateTime($dateTimeString)
             <a href="products.php" class="nav-item">
                 <span class="nav-icon">💊</span>
                 <span class="nav-label">Products</span>
+            </a>
+            <a href="../pos/dashboard.php" class="nav-item">
+                <span class="nav-icon">🧾</span>
+                <span class="nav-label">POS</span>
             </a>
             <a href="profile.php" class="nav-item">
                 <span class="nav-icon">👤</span>
@@ -225,7 +273,7 @@ function formatDateTime($dateTimeString)
             <section class="card import-card">
                 <div>
                     <h2>Import Product File</h2>
-                    <p>Upload .xlsx or .csv with columns: productName, description, category, price, stock, imagePath, expiryDate.</p>
+                    <p>Upload .xlsx or .csv with columns: productName, barcode, description, category, price, stock, imagePath, expiryDate.</p>
                 </div>
                 <form method="post" action="add-product.php" enctype="multipart/form-data" class="import-form">
                     <input type="hidden" name="action" value="import_product_submissions">
@@ -247,18 +295,22 @@ function formatDateTime($dateTimeString)
                             <input type="text" id="product_name" name="product_name" value="<?php echo htmlspecialchars($productName ?? ''); ?>" placeholder="Enter product name" required>
                         </div>
                         <div class="field-group">
+                            <label for="barcode">Barcode <span class="required">*</span></label>
+                            <input type="text" id="barcode" name="barcode" value="<?php echo htmlspecialchars($barcode ?? ''); ?>" placeholder="Scan or type the product barcode" autocomplete="off" required>
+                        </div>
+                        <div class="field-group">
                             <label for="description">Description</label>
                             <textarea id="description" name="description" rows="4" placeholder="Enter product description"><?php echo htmlspecialchars($productDescription ?? ''); ?></textarea>
                         </div>
                         <div class="grid-two">
                             <div class="field-group">
                                 <label for="category">Category</label>
-                                <select id="category" name="category">
-                                    <option value="Medication"<?php echo ($category ?? '') === 'Medication' ? ' selected' : ''; ?>>Medication</option>
-                                    <option value="Supplements"<?php echo ($category ?? '') === 'Supplements' ? ' selected' : ''; ?>>Supplements</option>
-                                    <option value="Personal Care"<?php echo ($category ?? '') === 'Personal Care' ? ' selected' : ''; ?>>Personal Care</option>
-                                    <option value="Equipment"<?php echo ($category ?? '') === 'Equipment' ? ' selected' : ''; ?>>Equipment</option>
-                                </select>
+                                <input type="text" id="category" name="category" list="category-options" value="<?php echo htmlspecialchars($category ?? ''); ?>" placeholder="Select or type a new category" required>
+                                <datalist id="category-options">
+                                    <?php foreach ($categoryNames as $categoryName): ?>
+                                        <option value="<?php echo htmlspecialchars($categoryName); ?>">
+                                    <?php endforeach; ?>
+                                </datalist>
                             </div>
                             <div class="field-group">
                                 <label for="price">Price (RM) <span class="required">*</span></label>
@@ -301,7 +353,7 @@ function formatDateTime($dateTimeString)
                                             <td>
                                                 <div class="submission-product">
                                                     <span class="submission-name"><?php echo htmlspecialchars($submission['productName']); ?></span>
-                                                    <span class="submission-meta">RM<?php echo number_format($submission['price'], 2); ?></span>
+                                                    <span class="submission-meta">Barcode: <?php echo htmlspecialchars($submission['barcode'] ?: '-'); ?> | RM<?php echo number_format($submission['price'], 2); ?></span>
                                                 </div>
                                             </td>
                                             <td>

@@ -306,6 +306,18 @@
     font-size: 14px;
 }
 
+.approval-barcode-image {
+    display: block;
+    width: 100%;
+    max-width: 260px;
+    height: auto;
+    margin-top: 8px;
+    padding: 6px;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    background: #ffffff;
+}
+
 .approval-actions {
     margin-top: 18px;
     display: flex;

@@ -2,14 +2,27 @@
 session_start();
 require_once __DIR__ . '/../db.php';
 require_once __DIR__ . '/../includes/product-import.php';
+require_once __DIR__ . '/../includes/product-expiry.php';
 
 if (!isset($_SESSION['userID']) || ($_SESSION['role'] ?? '') !== 'staff') {
     header('Location: ../login.php');
     exit;
 }
 
-$errors = [];
-$success = '';
+disableExpiredProducts($conn);
+ensureProductBarcodeSchema($conn);
+
+$errors = $_SESSION['flash_errors'] ?? [];
+$success = $_SESSION['flash_success'] ?? '';
+unset($_SESSION['flash_errors'], $_SESSION['flash_success']);
+
+function redirectWithImportMessage(string $success = '', array $errors = []): void
+{
+    $_SESSION['flash_success'] = $success;
+    $_SESSION['flash_errors'] = $errors;
+    header('Location: products.php');
+    exit;
+}
 
 // Handle product spreadsheet import
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'import_products') {
@@ -21,17 +34,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'impor
         $importedCount = insertProducts($conn, $productsToImport);
         $conn->commit();
         $success = $importedCount . ' product' . ($importedCount === 1 ? '' : 's') . ' imported successfully.';
+        redirectWithImportMessage($success);
     } catch (Throwable $e) {
         if ($importStarted) {
             $conn->rollback();
         }
         $errors[] = $e->getMessage();
+        redirectWithImportMessage('', $errors);
     }
 }
 
 // Handle add product
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_product') {
     $name        = trim($_POST['product_name'] ?? '');
+    $barcode     = normalizeBarcode($_POST['barcode'] ?? '');
     $imagePath   = trim($_POST['image_path'] ?? '');
     $description = trim($_POST['description'] ?? '');
     $category    = trim($_POST['category'] ?? '');
@@ -75,6 +91,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_p
     if ($name === '') {
         $errors[] = 'Product name is required.';
     }
+    if ($barcode === '') {
+        $errors[] = 'Barcode is required for POS scanning.';
+    } elseif (productBarcodeExists($conn, $barcode)) {
+        $errors[] = 'This barcode is already assigned to another product.';
+    }
     if ($category === '') {
         $errors[] = 'Category is required.';
     }
@@ -86,15 +107,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_p
     }
 
     if (empty($errors)) {
-        $physicalStock = 0;
+        try {
+            $barcodeImagePath = saveBarcodeImage($barcode);
+        } catch (Throwable $e) {
+            $errors[] = 'Unable to generate barcode image. Please try again.';
+        }
+    }
+
+    if (empty($errors)) {
+        $physicalStock = $stock;
         $onlineStock = $stock;
         $stmt = $conn->prepare(
-            'INSERT INTO products (productName, productDescription, category, price, stockQuantity, physicalStock, onlineStock, productType, complianceStatus, status, imagePath, expiryDate)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            'INSERT INTO products (productName, barcode, barcodeImagePath, productDescription, category, price, stockQuantity, physicalStock, onlineStock, productType, complianceStatus, status, imagePath, expiryDate)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $stmt->bind_param(
-            'sssiiiiissss',
+            'sssssdiiisssss',
             $name,
+            $barcode,
+            $barcodeImagePath,
             $description,
             $category,
             $price,
@@ -121,6 +152,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_p
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'edit_product') {
     $productId   = (int)($_POST['product_id'] ?? 0);
     $name        = trim($_POST['edit_product_name'] ?? '');
+    $barcode     = normalizeBarcode($_POST['edit_barcode'] ?? '');
     $imagePath   = trim($_POST['edit_image_path'] ?? '');
     $description = trim($_POST['edit_description'] ?? '');
     $category    = trim($_POST['edit_category'] ?? '');
@@ -167,6 +199,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'edit_
         if ($name === '') {
             $errors[] = 'Product name is required.';
         }
+        if ($barcode === '') {
+            $errors[] = 'Barcode is required for POS scanning.';
+        } elseif (productBarcodeExists($conn, $barcode, $productId)) {
+            $errors[] = 'This barcode is already assigned to another product.';
+        }
         if ($category === '') {
             $errors[] = 'Category is required.';
         }
@@ -179,18 +216,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'edit_
     }
 
     if (empty($errors) && $productId > 0) {
-        $physicalStock = 0;
+        try {
+            $barcodeImagePath = saveBarcodeImage($barcode);
+        } catch (Throwable $e) {
+            $errors[] = 'Unable to generate barcode image. Please try again.';
+        }
+    }
+
+    if (empty($errors) && $productId > 0) {
+        $physicalStock = $stock;
         $onlineStock = $stock;
         $stmt = $conn->prepare(
             'UPDATE products
-             SET productName = ?, productDescription = ?, category = ?, price = ?, stockQuantity = ?,
+             SET productName = ?, barcode = ?, barcodeImagePath = ?, productDescription = ?, category = ?, price = ?, stockQuantity = ?,
                  physicalStock = ?, onlineStock = ?, productType = ?,
                  complianceStatus = ?, status = ?, imagePath = ?, expiryDate = ?
              WHERE productID = ?'
         );
         $stmt->bind_param(
-            'sssiiiiissssi',
+            'sssssdiiisssssi',
             $name,
+            $barcode,
+            $barcodeImagePath,
             $description,
             $category,
             $price,
@@ -234,16 +281,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
 // List and filters
 $search    = trim($_GET['q'] ?? '');
 $categoryF = trim($_GET['cat'] ?? '');
+$statusF = trim($_GET['status'] ?? 'All');
+$perPage = 10;
+$page = max(1, (int)($_GET['page'] ?? 1));
 $where     = '1=1';
 $params    = [];
 $types     = '';
 
 if ($search !== '') {
-    $where .= ' AND (productName LIKE ? OR productDescription LIKE ?)';
+    $where .= ' AND (productName LIKE ? OR productDescription LIKE ? OR barcode LIKE ?)';
     $like = '%' . $search . '%';
     $params[] = $like;
     $params[] = $like;
-    $types .= 'ss';
+    $params[] = $like;
+    $types .= 'sss';
 }
 
 if ($categoryF !== '' && $categoryF !== 'All') {
@@ -252,23 +303,66 @@ if ($categoryF !== '' && $categoryF !== 'All') {
     $types .= 's';
 }
 
-$sql = "SELECT productID, productName, productDescription, category, price, stockQuantity, productType,
+if ($statusF === 'Active' || $statusF === 'Inactive') {
+    $where .= ' AND status = ?';
+    $params[] = $statusF;
+    $types .= 's';
+}
+
+$countSql = "SELECT COUNT(*) AS total FROM products WHERE $where";
+$countStmt = $conn->prepare($countSql);
+if (!empty($params)) {
+    $countStmt->bind_param($types, ...$params);
+}
+$countStmt->execute();
+$countResult = $countStmt->get_result();
+$totalProducts = (int)($countResult->fetch_assoc()['total'] ?? 0);
+$countStmt->close();
+
+$totalPages = max(1, (int)ceil($totalProducts / $perPage));
+if ($page > $totalPages) {
+    $page = $totalPages;
+}
+$offset = ($page - 1) * $perPage;
+
+$sql = "SELECT productID, productName, barcode, barcodeImagePath, productDescription, category, price, stockQuantity, productType,
                complianceStatus, status, imagePath, expiryDate
         FROM products
         WHERE $where
-        ORDER BY productName ASC";
+        ORDER BY productName ASC
+        LIMIT ? OFFSET ?";
 
 $stmt = $conn->prepare($sql);
-if (!empty($params)) {
-    $stmt->bind_param($types, ...$params);
-}
+$queryParams = array_merge($params, [$perPage, $offset]);
+$queryTypes = $types . 'ii';
+$stmt->bind_param($queryTypes, ...$queryParams);
 $stmt->execute();
 $result = $stmt->get_result();
 $products = $result->fetch_all(MYSQLI_ASSOC);
 $stmt->close();
 
+$pageBaseParams = [];
+if ($search !== '') {
+    $pageBaseParams['q'] = $search;
+}
+if ($categoryF !== '' && $categoryF !== 'All') {
+    $pageBaseParams['cat'] = $categoryF;
+}
+if ($statusF !== '' && $statusF !== 'All') {
+    $pageBaseParams['status'] = $statusF;
+}
+
 $catResult = $conn->query('SELECT DISTINCT category FROM products ORDER BY category ASC');
 $categories = $catResult ? $catResult->fetch_all(MYSQLI_ASSOC) : [];
+$categoryNames = ['Medication', 'Supplements', 'Personal Care', 'Equipment'];
+foreach ($categories as $categoryRow) {
+    $categoryName = trim((string) ($categoryRow['category'] ?? ''));
+    if ($categoryName !== '' && !in_array(strtolower($categoryName), array_map('strtolower', $categoryNames), true)) {
+        $categoryNames[] = $categoryName;
+    }
+}
+natcasesort($categoryNames);
+$categoryNames = array_values($categoryNames);
 
 function normalizeProductImagePath(string $path): string {
     $path = trim($path);
@@ -300,7 +394,7 @@ function resolveProductImageUrl(string $path): string {
     <title>Essen Pharmacy - Staff Product Management</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="css/staff-dashboard.css">
-    <link rel="stylesheet" href="../admin/css/admin-products.css">
+    <link rel="stylesheet" href="../admin/css/admin-products.css?v=2">
 </head>
 <body>
 <div class="staff-layout">
@@ -310,7 +404,7 @@ function resolveProductImageUrl(string $path): string {
                 <span class="toggle-icon">☰</span>
             </button>
             <div class="logo-circle">
-                <img src="../EssenPharmacy.png" alt="Essen Pharmacy" class="logo-image">
+                <img src="../logo-transparent.png" alt="Essen Pharmacy" class="logo-image">
             </div>
             <div class="sidebar-brand">
                 <div class="brand-title">Essen Pharmacy</div>
@@ -321,7 +415,7 @@ function resolveProductImageUrl(string $path): string {
         <nav class="sidebar-nav">
             <a href="dashboard.php" class="nav-item">
                 <span class="nav-icon">🏠</span>
-                <span class="nav-label">Inventory Sync</span>
+                <span class="nav-label">Dashboard</span>
             </a>
             <a href="add-product.php" class="nav-item">
                 <span class="nav-icon">➕</span>
@@ -330,6 +424,10 @@ function resolveProductImageUrl(string $path): string {
             <a href="products.php" class="nav-item active">
                 <span class="nav-icon">💊</span>
                 <span class="nav-label">Products</span>
+            </a>
+            <a href="../pos/dashboard.php" class="nav-item">
+                <span class="nav-icon">🧾</span>
+                <span class="nav-label">POS</span>
             </a>
             <a href="profile.php" class="nav-item">
                 <span class="nav-icon">👤</span>
@@ -371,7 +469,7 @@ function resolveProductImageUrl(string $path): string {
         <section class="product-import-card">
             <div>
                 <h2>Import Products</h2>
-                <p>Upload .xlsx or .csv with columns: productName, description, category, price, stock, imagePath, expiryDate, status, compliance.</p>
+                <p>Upload .xlsx or .csv with columns: productName, barcode, description, category, price, stock, imagePath, expiryDate, status, compliance.</p>
             </div>
             <form method="post" action="products.php" enctype="multipart/form-data" class="product-import-form">
                 <input type="hidden" name="action" value="import_products">
@@ -383,17 +481,29 @@ function resolveProductImageUrl(string $path): string {
         <div class="product-search-row">
             <div class="product-search-card">
                 <form method="get" action="products.php">
+                    <?php if ($categoryF !== '' && $categoryF !== 'All'): ?>
+                        <input type="hidden" name="cat" value="<?php echo htmlspecialchars($categoryF); ?>">
+                    <?php endif; ?>
+                    <?php if ($statusF !== '' && $statusF !== 'All'): ?>
+                        <input type="hidden" name="status" value="<?php echo htmlspecialchars($statusF); ?>">
+                    <?php endif; ?>
                     <input
                         type="text"
                         name="q"
                         class="product-search-input"
-                        placeholder="Search products..."
+                        placeholder="Search products or barcodes..."
                         value="<?php echo htmlspecialchars($search); ?>"
                     >
                 </form>
             </div>
             <div class="product-filter-card">
                 <form method="get" action="products.php">
+                    <?php if ($search !== ''): ?>
+                        <input type="hidden" name="q" value="<?php echo htmlspecialchars($search); ?>">
+                    <?php endif; ?>
+                    <?php if ($statusF !== '' && $statusF !== 'All'): ?>
+                        <input type="hidden" name="status" value="<?php echo htmlspecialchars($statusF); ?>">
+                    <?php endif; ?>
                     <select name="cat" class="product-filter-select" onchange="this.form.submit()">
                         <option value="All">All Categories</option>
                         <?php foreach ($categories as $cat): ?>
@@ -405,17 +515,33 @@ function resolveProductImageUrl(string $path): string {
                     </select>
                 </form>
             </div>
+            <div class="product-filter-card">
+                <form method="get" action="products.php">
+                    <?php if ($search !== ''): ?>
+                        <input type="hidden" name="q" value="<?php echo htmlspecialchars($search); ?>">
+                    <?php endif; ?>
+                    <?php if ($categoryF !== '' && $categoryF !== 'All'): ?>
+                        <input type="hidden" name="cat" value="<?php echo htmlspecialchars($categoryF); ?>">
+                    <?php endif; ?>
+                    <select name="status" class="product-filter-select" onchange="this.form.submit()">
+                        <option value="All" <?php echo $statusF === 'All' ? 'selected' : ''; ?>>All Status</option>
+                        <option value="Active" <?php echo $statusF === 'Active' ? 'selected' : ''; ?>>Active</option>
+                        <option value="Inactive" <?php echo $statusF === 'Inactive' ? 'selected' : ''; ?>>Inactive</option>
+                    </select>
+                </form>
+            </div>
         </div>
 
         <div class="product-list-card">
             <div class="product-list-header">
                 <h2>All Products</h2>
-                <div class="product-count">(<?php echo count($products); ?>)</div>
+                <div class="product-count">(<?php echo $totalProducts; ?>)</div>
             </div>
 
             <table class="product-table">
                 <thead>
                 <tr>
+                    <th class="product-number-col">No.</th>
                     <th>Product</th>
                     <th>Category</th>
                     <th>Price</th>
@@ -428,11 +554,12 @@ function resolveProductImageUrl(string $path): string {
                 <tbody>
                 <?php if (empty($products)): ?>
                     <tr>
-                        <td colspan="7">No products found.</td>
+                        <td colspan="8">No products found.</td>
                     </tr>
                 <?php else: ?>
-                    <?php foreach ($products as $p): ?>
+                    <?php foreach ($products as $index => $p): ?>
                         <tr>
+                            <td class="product-number"><?php echo $offset + $index + 1; ?></td>
                             <td>
                                 <div class="product-main">
                                     <div class="product-thumb">
@@ -444,6 +571,12 @@ function resolveProductImageUrl(string $path): string {
                                     </div>
                                     <div>
                                         <div class="product-name"><?php echo htmlspecialchars($p['productName']); ?></div>
+                                        <div class="product-desc">Barcode: <?php echo htmlspecialchars($p['barcode'] ?: '-'); ?></div>
+                                        <?php if (!empty($p['barcodeImagePath'])): ?>
+                                            <div class="product-barcode-preview">
+                                                <img src="<?php echo htmlspecialchars(resolveProductImageUrl($p['barcodeImagePath'])); ?>" alt="Barcode for <?php echo htmlspecialchars($p['productName']); ?>">
+                                            </div>
+                                        <?php endif; ?>
                                         <?php if (!empty($p['productDescription'])): ?>
                                             <div class="product-desc"><?php echo htmlspecialchars($p['productDescription']); ?></div>
                                         <?php endif; ?>
@@ -484,6 +617,7 @@ function resolveProductImageUrl(string $path): string {
                                 <div class="product-actions"
                                      data-product-id="<?php echo (int)$p['productID']; ?>"
                                      data-name="<?php echo htmlspecialchars($p['productName']); ?>"
+                                     data-barcode="<?php echo htmlspecialchars($p['barcode'] ?? ''); ?>"
                                      data-image="<?php echo htmlspecialchars(resolveProductImageUrl($p['imagePath'] ?? '')); ?>"
                                      data-desc="<?php echo htmlspecialchars($p['productDescription'] ?? ''); ?>"
                                      data-category="<?php echo htmlspecialchars($p['category']); ?>"
@@ -509,6 +643,22 @@ function resolveProductImageUrl(string $path): string {
                 <?php endif; ?>
                 </tbody>
             </table>
+            <?php if ($totalPages > 1): ?>
+                <div class="pagination">
+                    <?php
+                    $prevParams = array_merge($pageBaseParams, ['page' => max(1, $page - 1)]);
+                    $nextParams = array_merge($pageBaseParams, ['page' => min($totalPages, $page + 1)]);
+                    ?>
+                    <a class="pagination-link <?php echo $page <= 1 ? 'disabled' : ''; ?>" href="?<?php echo htmlspecialchars(http_build_query($prevParams)); ?>">Previous</a>
+                    <div class="pagination-pages">
+                        <?php for ($i = 1; $i <= $totalPages; $i++): ?>
+                            <?php $pageParams = array_merge($pageBaseParams, ['page' => $i]); ?>
+                            <a class="pagination-page <?php echo $i === $page ? 'active' : ''; ?>" href="?<?php echo htmlspecialchars(http_build_query($pageParams)); ?>"><?php echo $i; ?></a>
+                        <?php endfor; ?>
+                    </div>
+                    <a class="pagination-link <?php echo $page >= $totalPages ? 'disabled' : ''; ?>" href="?<?php echo htmlspecialchars(http_build_query($nextParams)); ?>">Next</a>
+                </div>
+            <?php endif; ?>
         </div>
     </main>
 </div>
@@ -540,6 +690,11 @@ function resolveProductImageUrl(string $path): string {
                 </div>
 
                 <div class="product-modal-field">
+                    <label class="product-modal-label" for="barcode">Barcode</label>
+                    <input type="text" id="barcode" name="barcode" class="product-modal-input" placeholder="Scan or type barcode" autocomplete="off" required>
+                </div>
+
+                <div class="product-modal-field">
                     <label class="product-modal-label" for="description">Description</label>
                     <textarea id="description" name="description" class="product-modal-textarea"></textarea>
                 </div>
@@ -547,16 +702,15 @@ function resolveProductImageUrl(string $path): string {
                 <div class="product-modal-grid">
                     <div class="product-modal-field">
                         <label class="product-modal-label" for="category">Category</label>
-                        <select id="category" name="category" class="product-modal-select" required>
-                            <option value="">Select category</option>
-                            <option value="Medication">Medication</option>
-                            <option value="Supplements">Supplements</option>
-                            <option value="Personal Care">Personal Care</option>
-                            <option value="Equipment">Equipment</option>
-                        </select>
+                        <input type="text" id="category" name="category" class="product-modal-input" list="category-options" placeholder="Select or type a new category" required>
+                        <datalist id="category-options">
+                            <?php foreach ($categoryNames as $categoryName): ?>
+                                <option value="<?php echo htmlspecialchars($categoryName); ?>">
+                            <?php endforeach; ?>
+                        </datalist>
                     </div>
                     <div class="product-modal-field">
-                        <label class="product-modal-label" for="price"></label>
+                        <label class="product-modal-label" for="price">Price (RM)</label>
                         <input type="number" step="0.01" min="0" id="price" name="price" class="product-modal-input" required>
                     </div>
                 </div>
@@ -638,6 +792,11 @@ function resolveProductImageUrl(string $path): string {
                 </div>
 
                 <div class="product-modal-field">
+                    <label class="product-modal-label" for="edit_barcode">Barcode</label>
+                    <input type="text" id="edit_barcode" name="edit_barcode" class="product-modal-input" placeholder="Scan or type barcode" autocomplete="off" required>
+                </div>
+
+                <div class="product-modal-field">
                     <label class="product-modal-label" for="edit_description">Description</label>
                     <textarea id="edit_description" name="edit_description" class="product-modal-textarea"></textarea>
                 </div>
@@ -645,12 +804,12 @@ function resolveProductImageUrl(string $path): string {
                 <div class="product-modal-grid">
                     <div class="product-modal-field">
                         <label class="product-modal-label" for="edit_category">Category</label>
-                        <select id="edit_category" name="edit_category" class="product-modal-select" required>
-                            <option value="Medication">Medication</option>
-                            <option value="Supplements">Supplements</option>
-                            <option value="Personal Care">Personal Care</option>
-                            <option value="Equipment">Equipment</option>
-                        </select>
+                        <input type="text" id="edit_category" name="edit_category" class="product-modal-input" list="edit-category-options" placeholder="Select or type a new category" required>
+                        <datalist id="edit-category-options">
+                            <?php foreach ($categoryNames as $categoryName): ?>
+                                <option value="<?php echo htmlspecialchars($categoryName); ?>">
+                            <?php endforeach; ?>
+                        </datalist>
                     </div>
                     <div class="product-modal-field">
                         <label class="product-modal-label" for="edit_price">Price (RM)</label>
@@ -816,12 +975,12 @@ function resolveProductImageUrl(string $path): string {
     const cancelEditProductBtn = document.getElementById('cancelEditProduct');
     const editProductId = document.getElementById('edit_product_id');
     const editProductName = document.getElementById('edit_product_name');
+    const editBarcode = document.getElementById('edit_barcode');
     const editDescription = document.getElementById('edit_description');
     const editCategory = document.getElementById('edit_category');
     const editPrice = document.getElementById('edit_price');
     const editStock = document.getElementById('edit_stock');
     const editExpiryDate = document.getElementById('edit_expiry_date');
-    const editProductType = document.getElementById('edit_product_type');
     const editStatus = document.getElementById('edit_status');
     const editCompliance = document.getElementById('edit_compliance');
 
@@ -859,11 +1018,11 @@ function resolveProductImageUrl(string $path): string {
                 editImageFileInput.value = '';
             }
             editProductName.value = container.getAttribute('data-name') || '';
+            editBarcode.value = container.getAttribute('data-barcode') || '';
             editDescription.value = container.getAttribute('data-desc') || '';
             editCategory.value = container.getAttribute('data-category') || 'Medication';
             editPrice.value = container.getAttribute('data-price') || '0';
             editStock.value = container.getAttribute('data-stock') || '0';
-            editProductType.value = container.getAttribute('data-product-type') || 'Both';
             editExpiryDate.value = container.getAttribute('data-expiry') || '';
             editStatus.value = container.getAttribute('data-status') || 'Active';
             editCompliance.value = container.getAttribute('data-compliance') || 'Approved';

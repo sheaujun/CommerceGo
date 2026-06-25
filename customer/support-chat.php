@@ -269,6 +269,10 @@ if ($readStmt) {
                     <span class="nav-icon">📜</span>
                     <span>Order History</span>
                 </a>
+                <a href="find-us.php" class="nav-item">
+                    <span class="nav-icon">&#128205;</span>
+                    <span>Find Us</span>
+                </a>
                 <a href="support-chat.php" class="nav-item active" aria-current="page">
                     <span class="nav-icon">💬</span>
                     <span>Support Chat</span>
@@ -352,9 +356,10 @@ if ($readStmt) {
                     <?php endif; ?>
                 </div>
 
-                <form method="post" class="composer">
-                    <input type="text" name="message" id="adminMessageInput" placeholder="Type your message to admin..." autocomplete="off" required />
-                    <button type="submit">Send</button>
+                <form method="post" class="composer" id="supportComposer">
+                    <input type="text" name="message" id="adminMessageInput" placeholder="Ask AI or type a message to admin..." autocomplete="off" required />
+                    <button type="button" class="ai-ask-button" id="askAiButton">Ask AI</button>
+                    <button type="submit">Send to admin</button>
                 </form>
             </div>
         </section>
@@ -365,6 +370,7 @@ if ($readStmt) {
     const customerOrders = <?php echo json_encode($customerOrders, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT); ?>;
     const chatBody = document.querySelector('.chat-body');
     const adminMessageInput = document.getElementById('adminMessageInput');
+    const askAiButton = document.getElementById('askAiButton');
 
     function currentTimeLabel() {
         return new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -502,6 +508,36 @@ if ($readStmt) {
             }
         });
     });
+
+    if (askAiButton && adminMessageInput) {
+        askAiButton.addEventListener('click', async () => {
+            const question = adminMessageInput.value.trim();
+            if (!question) {
+                adminMessageInput.focus();
+                return;
+            }
+
+            askAiButton.disabled = true;
+            askAiButton.textContent = 'Thinking...';
+            appendAiMessage(question, 'customer', 'You');
+
+            try {
+                const response = await fetch('ai-chat.php', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: question }),
+                });
+                const result = await response.json();
+                appendAiMessage(result.message || 'AI Quick Help is unavailable. Please send your message to our support team.', 'support', 'AI Assistant');
+                adminMessageInput.value = '';
+            } catch (error) {
+                appendAiMessage('AI Quick Help is temporarily unavailable. Please send your message to our support team.', 'support', 'AI Assistant');
+            } finally {
+                askAiButton.disabled = false;
+                askAiButton.textContent = 'Ask AI';
+            }
+        });
+    }
 </script>
 </body>
 </html>

@@ -35,16 +35,38 @@ body {
     margin-bottom: 20px;
 }
 
+.login-logo-image {
+    width: 54px;
+    height: 54px;
+    max-width: 54px;
+    max-height: 54px;
+    display: block;
+    object-fit: contain;
+    margin: 0 auto 12px;
+    background: transparent;
+    border: 0;
+}
+
 .logo-circle {
-    width: 48px;
-    height: 48px;
-    border-radius: 999px;
+    width: 54px;
+    height: 54px;
+    border-radius: 0;
     margin: 0 auto 12px;
     display: flex;
     align-items: center;
     justify-content: center;
-    background: linear-gradient(135deg, #7c3aed, #6366f1);
-    color: #ffffff;
+    background: transparent;
+    color: inherit;
+    overflow: visible;
+}
+
+.logo-image {
+    width: 54px;
+    height: 54px;
+    max-width: 54px;
+    max-height: 54px;
+    display: block;
+    object-fit: contain;
 }
 
 .logo-icon {

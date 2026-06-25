@@ -206,6 +206,10 @@ function resolveImageUrl($imagePath) {
                     <span class="nav-icon">📜</span>
                     <span>Order History</span>
                 </a>
+                <a href="find-us.php" class="nav-item">
+                    <span class="nav-icon">&#128205;</span>
+                    <span>Find Us</span>
+                </a>
                 <a href="support-chat.php" class="nav-item">
                     <span class="nav-icon">💬</span>
                     <span>Support Chat</span>

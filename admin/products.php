@@ -10,6 +10,7 @@ if (!isset($_SESSION['userID']) || ($_SESSION['role'] ?? '') !== 'admin') {
 }
 
 disableExpiredProducts($conn);
+ensureProductBarcodeSchema($conn);
 
 $errors = $_SESSION['flash_errors'] ?? [];
 $success = $_SESSION['flash_success'] ?? '';
@@ -46,6 +47,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'impor
 // Handle add product
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_product') {
     $name        = trim($_POST['product_name'] ?? '');
+    $barcode     = normalizeBarcode($_POST['barcode'] ?? '');
     $imagePath   = trim($_POST['image_path'] ?? '');
     $description = trim($_POST['description'] ?? '');
     $category    = trim($_POST['category'] ?? '');
@@ -89,6 +91,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_p
     if ($name === '') {
         $errors[] = 'Product name is required.';
     }
+    if ($barcode === '') {
+        $errors[] = 'Barcode is required for POS scanning.';
+    } elseif (productBarcodeExists($conn, $barcode)) {
+        $errors[] = 'This barcode is already assigned to another product.';
+    }
     if ($category === '') {
         $errors[] = 'Category is required.';
     }
@@ -100,15 +107,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_p
     }
 
     if (empty($errors)) {
+        try {
+            $barcodeImagePath = saveBarcodeImage($barcode);
+        } catch (Throwable $e) {
+            $errors[] = 'Unable to generate barcode image. Please try again.';
+        }
+    }
+
+    if (empty($errors)) {
         $physicalStock = $stock;
         $onlineStock = $stock;
         $stmt = $conn->prepare(
-            'INSERT INTO products (productName, productDescription, category, price, stockQuantity, physicalStock, onlineStock, productType, complianceStatus, status, imagePath, expiryDate)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            'INSERT INTO products (productName, barcode, barcodeImagePath, productDescription, category, price, stockQuantity, physicalStock, onlineStock, productType, complianceStatus, status, imagePath, expiryDate)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $stmt->bind_param(
-            'sssiiiiissss',
+            'sssssdiiisssss',
             $name,
+            $barcode,
+            $barcodeImagePath,
             $description,
             $category,
             $price,
@@ -135,6 +152,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'add_p
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'edit_product') {
     $productId   = (int)($_POST['product_id'] ?? 0);
     $name        = trim($_POST['edit_product_name'] ?? '');
+    $barcode     = normalizeBarcode($_POST['edit_barcode'] ?? '');
     $imagePath   = trim($_POST['edit_image_path'] ?? '');
     $description = trim($_POST['edit_description'] ?? '');
     $category    = trim($_POST['edit_category'] ?? '');
@@ -181,6 +199,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'edit_
         if ($name === '') {
             $errors[] = 'Product name is required.';
         }
+        if ($barcode === '') {
+            $errors[] = 'Barcode is required for POS scanning.';
+        } elseif (productBarcodeExists($conn, $barcode, $productId)) {
+            $errors[] = 'This barcode is already assigned to another product.';
+        }
         if ($category === '') {
             $errors[] = 'Category is required.';
         }
@@ -193,18 +216,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'edit_
     }
 
     if (empty($errors) && $productId > 0) {
+        try {
+            $barcodeImagePath = saveBarcodeImage($barcode);
+        } catch (Throwable $e) {
+            $errors[] = 'Unable to generate barcode image. Please try again.';
+        }
+    }
+
+    if (empty($errors) && $productId > 0) {
         $physicalStock = $stock;
         $onlineStock = $stock;
         $stmt = $conn->prepare(
             'UPDATE products
-             SET productName = ?, productDescription = ?, category = ?, price = ?, stockQuantity = ?,
+             SET productName = ?, barcode = ?, barcodeImagePath = ?, productDescription = ?, category = ?, price = ?, stockQuantity = ?,
                  physicalStock = ?, onlineStock = ?, productType = ?,
                  complianceStatus = ?, status = ?, imagePath = ?, expiryDate = ?
              WHERE productID = ?'
         );
         $stmt->bind_param(
-            'sssiiiiissssi',
+            'sssssdiiisssssi',
             $name,
+            $barcode,
+            $barcodeImagePath,
             $description,
             $category,
             $price,
@@ -255,11 +288,12 @@ $params    = [];
 $types     = '';
 
 if ($search !== '') {
-    $where .= ' AND (productName LIKE ? OR productDescription LIKE ?)';
+    $where .= ' AND (productName LIKE ? OR productDescription LIKE ? OR barcode LIKE ?)';
     $like = '%' . $search . '%';
     $params[] = $like;
     $params[] = $like;
-    $types .= 'ss';
+    $params[] = $like;
+    $types .= 'sss';
 }
 
 if ($categoryF !== '' && $categoryF !== 'All') {
@@ -284,7 +318,7 @@ if ($page > $totalPages) {
 }
 $offset = ($page - 1) * $perPage;
 
-$sql = "SELECT productID, productName, productDescription, category, price, stockQuantity, productType,
+$sql = "SELECT productID, productName, barcode, barcodeImagePath, productDescription, category, price, stockQuantity, productType,
                complianceStatus, status, imagePath, expiryDate
         FROM products
         WHERE $where
@@ -311,6 +345,15 @@ if ($categoryF !== '' && $categoryF !== 'All') {
 // For category filter options
 $catResult = $conn->query('SELECT DISTINCT category FROM products ORDER BY category ASC');
 $categories = $catResult ? $catResult->fetch_all(MYSQLI_ASSOC) : [];
+$categoryNames = ['Medication', 'Supplements', 'Personal Care', 'Equipment'];
+foreach ($categories as $categoryRow) {
+    $categoryName = trim((string) ($categoryRow['category'] ?? ''));
+    if ($categoryName !== '' && !in_array(strtolower($categoryName), array_map('strtolower', $categoryNames), true)) {
+        $categoryNames[] = $categoryName;
+    }
+}
+natcasesort($categoryNames);
+$categoryNames = array_values($categoryNames);
 
 ?>
 <!DOCTYPE html>
@@ -421,7 +464,7 @@ $categories = $catResult ? $catResult->fetch_all(MYSQLI_ASSOC) : [];
         <section class="product-import-card">
             <div>
                 <h2>Import Products</h2>
-                <p>Upload .xlsx or .csv with columns: productName, description, category, price, stock, imagePath, expiryDate, status, compliance.</p>
+                <p>Upload .xlsx or .csv with columns: productName, barcode, description, category, price, stock, imagePath, expiryDate, status, compliance.</p>
             </div>
             <form method="post" action="products.php" enctype="multipart/form-data" class="product-import-form">
                 <input type="hidden" name="action" value="import_products">
@@ -440,7 +483,7 @@ $categories = $catResult ? $catResult->fetch_all(MYSQLI_ASSOC) : [];
                         type="text"
                         name="q"
                         class="product-search-input"
-                        placeholder="Search products..."
+                        placeholder="Search products or barcodes..."
                         value="<?php echo htmlspecialchars($search); ?>"
                     >
                 </form>
@@ -502,6 +545,12 @@ $categories = $catResult ? $catResult->fetch_all(MYSQLI_ASSOC) : [];
                                     </div>
                                     <div>
                                         <div class="product-name"><?php echo htmlspecialchars($p['productName']); ?></div>
+                                        <div class="product-desc">Barcode: <?php echo htmlspecialchars($p['barcode'] ?: '-'); ?></div>
+                                        <?php if (!empty($p['barcodeImagePath'])): ?>
+                                            <div class="product-barcode-preview">
+                                                <img src="<?php echo htmlspecialchars($p['barcodeImagePath']); ?>" alt="Barcode for <?php echo htmlspecialchars($p['productName']); ?>">
+                                            </div>
+                                        <?php endif; ?>
                                         <?php if (!empty($p['productDescription'])): ?>
                                             <div class="product-desc"><?php echo htmlspecialchars($p['productDescription']); ?></div>
                                         <?php endif; ?>
@@ -542,6 +591,7 @@ $categories = $catResult ? $catResult->fetch_all(MYSQLI_ASSOC) : [];
                                 <div class="product-actions"
                                      data-product-id="<?php echo (int)$p['productID']; ?>"
                                      data-name="<?php echo htmlspecialchars($p['productName']); ?>"
+                                     data-barcode="<?php echo htmlspecialchars($p['barcode'] ?? ''); ?>"
                                      data-image="<?php echo htmlspecialchars($p['imagePath'] ?? ''); ?>"
                                      data-desc="<?php echo htmlspecialchars($p['productDescription'] ?? ''); ?>"
                                      data-category="<?php echo htmlspecialchars($p['category']); ?>"
@@ -613,6 +663,11 @@ $categories = $catResult ? $catResult->fetch_all(MYSQLI_ASSOC) : [];
                 </div>
 
                 <div class="product-modal-field">
+                    <label class="product-modal-label" for="barcode">Barcode</label>
+                    <input type="text" id="barcode" name="barcode" class="product-modal-input" placeholder="Scan or type barcode" autocomplete="off" required>
+                </div>
+
+                <div class="product-modal-field">
                     <label class="product-modal-label" for="description">Description</label>
                     <textarea id="description" name="description" class="product-modal-textarea"></textarea>
                 </div>
@@ -620,13 +675,12 @@ $categories = $catResult ? $catResult->fetch_all(MYSQLI_ASSOC) : [];
                 <div class="product-modal-grid">
                     <div class="product-modal-field">
                         <label class="product-modal-label" for="category">Category</label>
-                        <select id="category" name="category" class="product-modal-select" required>
-                            <option value="">Select category</option>
-                            <option value="Medication">Medication</option>
-                            <option value="Supplements">Supplements</option>
-                            <option value="Personal Care">Personal Care</option>
-                            <option value="Equipment">Equipment</option>
-                        </select>
+                        <input type="text" id="category" name="category" class="product-modal-input" list="category-options" placeholder="Select or type a new category" required>
+                        <datalist id="category-options">
+                            <?php foreach ($categoryNames as $categoryName): ?>
+                                <option value="<?php echo htmlspecialchars($categoryName); ?>">
+                            <?php endforeach; ?>
+                        </datalist>
                     </div>
                     <div class="product-modal-field">
                         <label class="product-modal-label" for="price">Price (RM)</label>
@@ -700,6 +754,11 @@ $categories = $catResult ? $catResult->fetch_all(MYSQLI_ASSOC) : [];
                 </div>
 
                 <div class="product-modal-field">
+                    <label class="product-modal-label" for="edit_barcode">Barcode</label>
+                    <input type="text" id="edit_barcode" name="edit_barcode" class="product-modal-input" placeholder="Scan or type barcode" autocomplete="off" required>
+                </div>
+
+                <div class="product-modal-field">
                     <label class="product-modal-label" for="edit_description">Description</label>
                     <textarea id="edit_description" name="edit_description" class="product-modal-textarea"></textarea>
                 </div>
@@ -707,12 +766,12 @@ $categories = $catResult ? $catResult->fetch_all(MYSQLI_ASSOC) : [];
                 <div class="product-modal-grid">
                     <div class="product-modal-field">
                         <label class="product-modal-label" for="edit_category">Category</label>
-                        <select id="edit_category" name="edit_category" class="product-modal-select" required>
-                            <option value="Medication">Medication</option>
-                            <option value="Supplements">Supplements</option>
-                            <option value="Personal Care">Personal Care</option>
-                            <option value="Equipment">Equipment</option>
-                        </select>
+                        <input type="text" id="edit_category" name="edit_category" class="product-modal-input" list="edit-category-options" placeholder="Select or type a new category" required>
+                        <datalist id="edit-category-options">
+                            <?php foreach ($categoryNames as $categoryName): ?>
+                                <option value="<?php echo htmlspecialchars($categoryName); ?>">
+                            <?php endforeach; ?>
+                        </datalist>
                     </div>
                     <div class="product-modal-field">
                         <label class="product-modal-label" for="edit_price">Price (RM)</label>
@@ -867,6 +926,7 @@ $categories = $catResult ? $catResult->fetch_all(MYSQLI_ASSOC) : [];
     const cancelEditProductBtn = document.getElementById('cancelEditProduct');
     const editProductId = document.getElementById('edit_product_id');
     const editProductName = document.getElementById('edit_product_name');
+    const editBarcode = document.getElementById('edit_barcode');
     const editDescription = document.getElementById('edit_description');
     const editCategory = document.getElementById('edit_category');
     const editPrice = document.getElementById('edit_price');
@@ -909,6 +969,7 @@ $categories = $catResult ? $catResult->fetch_all(MYSQLI_ASSOC) : [];
                 editImageFileInput.value = '';
             }
             editProductName.value = container.getAttribute('data-name') || '';
+            editBarcode.value = container.getAttribute('data-barcode') || '';
             editDescription.value = container.getAttribute('data-desc') || '';
             editCategory.value = container.getAttribute('data-category') || 'Medication';
             editPrice.value = container.getAttribute('data-price') || '0';

@@ -192,7 +192,7 @@ $joinDate = $user['created_at'] ? date('Y-m-d', strtotime($user['created_at'])) 
                 <span class="toggle-icon">☰</span>
             </button>
             <div class="logo-circle">
-                <img src="../EssenPharmacy.png" alt="Essen Pharmacy" class="logo-image">
+                <img src="../logo-transparent.png" alt="Essen Pharmacy" class="logo-image">
             </div>
             <div class="sidebar-brand">
                 <div class="brand-title">Essen Pharmacy</div>
@@ -202,7 +202,7 @@ $joinDate = $user['created_at'] ? date('Y-m-d', strtotime($user['created_at'])) 
         <nav class="sidebar-nav">
             <a href="dashboard.php" class="nav-item">
                 <span class="nav-icon">🏠</span>
-                <span class="nav-label">Inventory Sync</span>
+                <span class="nav-label">Dashboard</span>
             </a>
             <a href="add-product.php" class="nav-item">
                 <span class="nav-icon">➕</span>
@@ -211,6 +211,10 @@ $joinDate = $user['created_at'] ? date('Y-m-d', strtotime($user['created_at'])) 
             <a href="products.php" class="nav-item">
                 <span class="nav-icon">💊</span>
                 <span class="nav-label">Products</span>
+            </a>
+            <a href="../pos/dashboard.php" class="nav-item">
+                <span class="nav-icon">🧾</span>
+                <span class="nav-label">POS</span>
             </a>
             <a href="profile.php" class="nav-item active">
                 <span class="nav-icon">👤</span>

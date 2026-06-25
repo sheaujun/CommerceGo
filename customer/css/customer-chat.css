@@ -267,6 +267,14 @@
     background: #5855eb;
 }
 
+.composer .ai-ask-button {
+    background: #7c3aed;
+}
+
+.composer .ai-ask-button:hover {
+    background: #6d28d9;
+}
+
 .composer button:disabled {
     opacity: 0.5;
     cursor: not-allowed;
@@ -307,5 +315,13 @@
         align-items: flex-start;
         flex-direction: column;
         gap: 4px;
+    }
+
+    .composer {
+        flex-wrap: wrap;
+    }
+
+    .composer input[type="text"] {
+        flex-basis: 100%;
     }
 }

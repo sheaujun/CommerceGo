@@ -1,6 +1,7 @@
 <?php
 session_start();
 require_once __DIR__ . '/../db.php';
+require_once __DIR__ . '/../includes/product-expiry.php';
 
 // Guard for staff users only
 if (!isset($_SESSION['userID']) || ($_SESSION['role'] ?? '') !== 'staff') {
@@ -8,54 +9,22 @@ if (!isset($_SESSION['userID']) || ($_SESSION['role'] ?? '') !== 'staff') {
     exit;
 }
 
+disableExpiredProducts($conn);
+
 $errors = [];
 $success = '';
 $message = '';
 $searchQuery = trim($_GET['search'] ?? '');
 $selectedCategory = trim($_GET['category'] ?? 'All');
-
-function normalizeInventoryStocks(array $item): array
-{
-    $total = max(0, (int) ($item['stockQuantity'] ?? 0));
-    $physicalRaw = array_key_exists('physicalStock', $item) && $item['physicalStock'] !== null
-        ? max(0, (int) $item['physicalStock'])
-        : null;
-    $onlineRaw = array_key_exists('onlineStock', $item) && $item['onlineStock'] !== null
-        ? max(0, (int) $item['onlineStock'])
-        : null;
-
-    $isLegacyMirrored = $physicalRaw !== null
-        && $onlineRaw !== null
-        && $physicalRaw === $total
-        && $onlineRaw === $total;
-
-    if ($physicalRaw === null && $onlineRaw === null) {
-        $physical = 0;
-        $online = $total;
-    } elseif ($isLegacyMirrored) {
-        $physical = 0;
-        $online = $total;
-    } else {
-        $physical = $physicalRaw ?? 0;
-        $online = $onlineRaw ?? max(0, $total - $physical);
-        $total = $physical + $online;
-    }
-
-    $item['physicalStock'] = $physical;
-    $item['onlineStock'] = $online;
-    $item['stockQuantity'] = $total;
-
-    return $item;
-}
+$perPage = 10;
+$page = max(1, (int)($_GET['page'] ?? 1));
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
 
     if ($action === 'save_row' && isset($_POST['item_id'])) {
         $itemId = (int) $_POST['item_id'];
-        $physicalStock = max(0, (int) ($_POST['physical_stock'] ?? 0));
-        $onlineStock = max(0, (int) ($_POST['online_stock'] ?? 0));
-        $totalStock = $physicalStock + $onlineStock;
+        $stockQuantity = max(0, (int) ($_POST['stock_quantity'] ?? 0));
 
         $stmt = $conn->prepare(
             'UPDATE products
@@ -63,7 +32,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
              WHERE productID = ?'
         );
         if ($stmt) {
-            $stmt->bind_param('iiii', $physicalStock, $onlineStock, $totalStock, $itemId);
+            $stmt->bind_param('iiii', $stockQuantity, $stockQuantity, $stockQuantity, $itemId);
             if ($stmt->execute()) {
                 $message = 'Product stock saved successfully.';
             } else {
@@ -109,6 +78,24 @@ if ($selectedCategory !== '' && $selectedCategory !== 'All') {
     $types .= 's';
 }
 
+$countSql = "SELECT COUNT(*) AS total FROM products WHERE $where";
+$countStmt = $conn->prepare($countSql);
+if (!empty($params) && $countStmt) {
+    $countStmt->bind_param($types, ...$params);
+}
+$totalSKUs = 0;
+if ($countStmt) {
+    $countStmt->execute();
+    $countResult = $countStmt->get_result();
+    $totalSKUs = (int)($countResult->fetch_assoc()['total'] ?? 0);
+    $countStmt->close();
+}
+$totalPages = max(1, (int)ceil($totalSKUs / $perPage));
+if ($page > $totalPages) {
+    $page = $totalPages;
+}
+$offset = ($page - 1) * $perPage;
+
 $sql = "SELECT productID,
                productName,
                category,
@@ -117,8 +104,6 @@ $sql = "SELECT productID,
                imagePath,
                expiryDate,
                stockQuantity,
-               physicalStock,
-               onlineStock,
                COALESCE(productType, 'Both') AS productType
         FROM products
         WHERE $where
@@ -136,29 +121,38 @@ $sql = "SELECT productID,
                 WHEN expiryDate < CURDATE() THEN expiryDate
                 ELSE NULL
             END DESC,
-            productName ASC";
+            productName ASC
+        LIMIT ? OFFSET ?";
 
 $categoryResult = $conn->query("SELECT DISTINCT category FROM products ORDER BY category ASC");
 $categories = $categoryResult ? $categoryResult->fetch_all(MYSQLI_ASSOC) : [];
 
 $stmt = $conn->prepare($sql);
-if (!empty($params) && $stmt) {
-    $stmt->bind_param($types, ...$params);
+if ($stmt) {
+    $queryParams = array_merge($params, [$perPage, $offset]);
+    $queryTypes = $types . 'ii';
+    $stmt->bind_param($queryTypes, ...$queryParams);
 }
 if ($stmt) {
     $stmt->execute();
     $result = $stmt->get_result();
     $filteredInventory = $result->fetch_all(MYSQLI_ASSOC);
     $stmt->close();
-    $filteredInventory = array_map('normalizeInventoryStocks', $filteredInventory);
 } else {
     $filteredInventory = [];
     $errors[] = 'Unable to load inventory from the database.';
 }
 
-$totalSKUs = count($filteredInventory);
 $pendingCompliance = count(array_filter($filteredInventory, fn($item) => $item['complianceStatus'] !== 'Approved'));
 $lowStockItems = count(array_filter($filteredInventory, fn($item) => $item['stockQuantity'] < 100));
+
+$pageBaseParams = [];
+if ($searchQuery !== '') {
+    $pageBaseParams['search'] = $searchQuery;
+}
+if ($selectedCategory !== '' && $selectedCategory !== 'All') {
+    $pageBaseParams['category'] = $selectedCategory;
+}
 
 function isExpiringSoon($dateStr) {
     $expiryDate = new DateTime($dateStr);
@@ -193,7 +187,7 @@ function resolveProductImageUrl(string $path): string {
     <meta charset="UTF-8">
     <title>Essen Pharmacy - Staff Dashboard</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="stylesheet" href="css/staff-dashboard.css">
+    <link rel="stylesheet" href="css/staff-dashboard.css?v=2">
 </head>
 <body>
 <div class="staff-layout">
@@ -203,7 +197,7 @@ function resolveProductImageUrl(string $path): string {
                 <span class="toggle-icon">☰</span>
             </button>
             <div class="logo-circle">
-                <img src="../EssenPharmacy.png" alt="Essen Pharmacy" class="logo-image">
+                <img src="../logo-transparent.png" alt="Essen Pharmacy" class="logo-image">
             </div>
             <div class="sidebar-brand">
                 <div class="brand-title">Essen Pharmacy</div>
@@ -213,7 +207,7 @@ function resolveProductImageUrl(string $path): string {
         <nav class="sidebar-nav">
             <a href="dashboard.php" class="nav-item active">
                 <span class="nav-icon">🏠</span>
-                <span class="nav-label">Inventory Sync</span>
+                <span class="nav-label">Dashboard</span>
             </a>
             <a href="add-product.php" class="nav-item">
                 <span class="nav-icon">➕</span>
@@ -222,6 +216,10 @@ function resolveProductImageUrl(string $path): string {
             <a href="products.php" class="nav-item">
                 <span class="nav-icon">💊</span>
                 <span class="nav-label">Products</span>
+            </a>
+            <a href="../pos/dashboard.php" class="nav-item">
+                <span class="nav-icon">🧾</span>
+                <span class="nav-label">POS</span>
             </a>
             <a href="profile.php" class="nav-item">
                 <span class="nav-icon">👤</span>
@@ -242,13 +240,14 @@ function resolveProductImageUrl(string $path): string {
             <!-- <nav class="breadcrumb">
                 <span>Dashboard</span>
                 <span class="breadcrumb-separator">›</span>
-                <span class="breadcrumb-current">Inventory Sync</span>
+                <span class="breadcrumb-current">Dashboard</span>
             </nav> -->
-            <h1>Stock Synchronization</h1>
+            <h1>Dashboard</h1>
         </div>
 
         <div class="toolbar">
             <form method="get" action="dashboard.php" class="toolbar-filter-form">
+                <input type="hidden" name="page" value="1">
                 <label class="search-field">
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 3A7.5 7.5 0 1 1 3 10.5 7.509 7.509 0 0 1 10.5 3zm8.432 15.695-3.847-3.846a8.164 8.164 0 0 0 1.497-4.662A8.163 8.163 0 0 0 8.152 1.018 8.163 8.163 0 0 0 .5 9.611a8.163 8.163 0 0 0 8.152 8.592 8.161 8.161 0 0 0 4.661-1.498l3.846 3.846a.75.75 0 0 0 1.06-1.06z"></path></svg>
                     <input type="text" name="search" value="<?php echo htmlspecialchars($searchQuery); ?>" placeholder="Search medications...">
@@ -302,10 +301,8 @@ function resolveProductImageUrl(string $path): string {
                 <thead>
                     <tr>
                         <th>Product Name</th>
-                        <th>Batch ID</th>
-                        <th>Physical Stock</th>
-                        <th>Online Stock</th>
-                        <th>Total Stock</th>
+                        <th>Product ID</th>
+                        <th>Stock</th>
                         <th>Compliance</th>
                         <th>Expiry Date</th>
                         <th class="actions-col">Actions</th>
@@ -325,13 +322,7 @@ function resolveProductImageUrl(string $path): string {
                             </td>
                             <td>#<?php echo htmlspecialchars($item['productID']); ?></td>
                             <td>
-                                <input type="number" name="physical_stock" value="<?php echo $item['physicalStock']; ?>" min="0" class="stock-input" form="save-form-<?php echo $item['productID']; ?>">
-                            </td>
-                            <td>
-                                <input type="number" name="online_stock" value="<?php echo $item['onlineStock']; ?>" min="0" class="stock-input" form="save-form-<?php echo $item['productID']; ?>">
-                            </td>
-                            <td>
-                                <span class="total-stock-pill" id="total-stock-<?php echo $item['productID']; ?>"><?php echo htmlspecialchars($item['stockQuantity']); ?></span>
+                                <input type="number" name="stock_quantity" value="<?php echo (int)$item['stockQuantity']; ?>" min="0" class="stock-input" form="save-form-<?php echo $item['productID']; ?>" readonly data-original-stock="<?php echo (int)$item['stockQuantity']; ?>">
                             </td>
                             <td>
                                 <button type="submit" class="compliance-toggle <?php echo ($item['complianceStatus'] === 'Approved') ? 'compliant' : 'pending'; ?>" form="toggle-form-<?php echo $item['productID']; ?>">
@@ -345,11 +336,11 @@ function resolveProductImageUrl(string $path): string {
                                 <?php endif; ?>
                             </td>
                             <td class="actions-col">
-                                <button type="submit" class="btn-icon" form="save-form-<?php echo $item['productID']; ?>">Save</button>
+                                <button type="button" class="btn-icon edit-stock-btn" data-form-id="save-form-<?php echo $item['productID']; ?>">Edit</button>
                             </td>
                         </tr>
                         <tr class="hidden-row">
-                            <td colspan="8">
+                            <td colspan="6">
                                 <form id="save-form-<?php echo $item['productID']; ?>" method="post" action="dashboard.php" class="hidden-form">
                                     <input type="hidden" name="action" value="save_row">
                                     <input type="hidden" name="item_id" value="<?php echo $item['productID']; ?>">
@@ -370,6 +361,23 @@ function resolveProductImageUrl(string $path): string {
                     <p>No products found.</p>
                 </div>
             <?php endif; ?>
+
+            <?php if ($totalPages > 1): ?>
+                <div class="dashboard-pagination">
+                    <?php
+                    $prevParams = array_merge($pageBaseParams, ['page' => max(1, $page - 1)]);
+                    $nextParams = array_merge($pageBaseParams, ['page' => min($totalPages, $page + 1)]);
+                    ?>
+                    <a class="page-link <?php echo $page <= 1 ? 'disabled' : ''; ?>" href="?<?php echo htmlspecialchars(http_build_query($prevParams)); ?>">Previous</a>
+                    <div class="page-number-group">
+                        <?php for ($i = 1; $i <= $totalPages; $i++): ?>
+                            <?php $pageParams = array_merge($pageBaseParams, ['page' => $i]); ?>
+                            <a class="page-number <?php echo $i === $page ? 'active' : ''; ?>" href="?<?php echo htmlspecialchars(http_build_query($pageParams)); ?>"><?php echo $i; ?></a>
+                        <?php endfor; ?>
+                    </div>
+                    <a class="page-link <?php echo $page >= $totalPages ? 'disabled' : ''; ?>" href="?<?php echo htmlspecialchars(http_build_query($nextParams)); ?>">Next</a>
+                </div>
+            <?php endif; ?>
         </div>
     </section>
 </div>
@@ -386,25 +394,27 @@ function resolveProductImageUrl(string $path): string {
         });
     }
 
-    document.querySelectorAll('form[id^="save-form-"]').forEach((form) => {
-        const physicalInput = document.querySelector(`input[name="physical_stock"][form="${form.id}"]`);
-        const onlineInput = document.querySelector(`input[name="online_stock"][form="${form.id}"]`);
-        const productId = form.id.replace('save-form-', '');
-        const totalLabel = document.getElementById(`total-stock-${productId}`);
+    document.querySelectorAll('.edit-stock-btn').forEach((button) => {
+        button.addEventListener('click', () => {
+            const formId = button.dataset.formId;
+            const input = document.querySelector(`input[name="stock_quantity"][form="${formId}"]`);
+            const form = document.getElementById(formId);
 
-        if (!physicalInput || !onlineInput || !totalLabel) {
-            return;
-        }
+            if (!input || !form) {
+                return;
+            }
 
-        const updateTotal = () => {
-            const physical = Math.max(0, parseInt(physicalInput.value || '0', 10) || 0);
-            const online = Math.max(0, parseInt(onlineInput.value || '0', 10) || 0);
-            totalLabel.textContent = physical + online;
-        };
+            if (input.hasAttribute('readonly')) {
+                input.removeAttribute('readonly');
+                input.focus();
+                input.select();
+                button.textContent = 'Save';
+                button.classList.add('saving');
+                return;
+            }
 
-        physicalInput.addEventListener('input', updateTotal);
-        onlineInput.addEventListener('input', updateTotal);
-        updateTotal();
+            form.submit();
+        });
     });
 </script>
 </body>

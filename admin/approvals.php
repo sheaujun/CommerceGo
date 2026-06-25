@@ -1,6 +1,7 @@
 <?php
 session_start();
 require_once __DIR__ . '/../db.php';
+require_once __DIR__ . '/../includes/product-schema.php';
 
 if (!isset($_SESSION['userID']) || ($_SESSION['role'] ?? '') !== 'admin') {
     header('Location: ../login.php');
@@ -9,6 +10,7 @@ if (!isset($_SESSION['userID']) || ($_SESSION['role'] ?? '') !== 'admin') {
 
 $errors = [];
 $success = '';
+ensureProductBarcodeSchema($conn);
 
 function formatDate($dateString)
 {
@@ -39,7 +41,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (empty($errors)) {
         if ($action === 'approve') {
             $stmt = $conn->prepare(
-                'SELECT productName, productDescription, category, price, stockQuantity, imagePath, expiryDate
+                'SELECT productName, barcode, barcodeImagePath, productDescription, category, price, stockQuantity, imagePath, expiryDate
                  FROM product_submissions
                  WHERE submissionID = ? AND status = "Pending"'
             );
@@ -51,19 +53,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             if (!$submission) {
                 $errors[] = 'Submission not found or already processed.';
+            } elseif ($submission['barcode'] === '') {
+                $errors[] = 'Submission needs a barcode before it can be approved.';
+            } elseif (productBarcodeExists($conn, $submission['barcode'])) {
+                $errors[] = 'This barcode is already assigned to another product.';
             } else {
+                try {
+                    $barcodeImagePath = $submission['barcodeImagePath'] ?: saveBarcodeImage($submission['barcode']);
+                } catch (Throwable $e) {
+                    $errors[] = 'Unable to generate barcode image. Please try again.';
+                    $barcodeImagePath = '';
+                }
+            }
+
+            if (empty($errors) && $submission) {
                 $conn->begin_transaction();
                 try {
                     $insert = $conn->prepare(
                         'INSERT INTO products
-                         (productName, productDescription, category, price, stockQuantity, complianceStatus, status, imagePath, expiryDate)
-                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                         (productName, barcode, barcodeImagePath, productDescription, category, price, stockQuantity, complianceStatus, status, imagePath, expiryDate)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
                     );
                     $approvedStatus = 'Approved';
                     $activeStatus = 'Active';
                     $insert->bind_param(
-                        'sssisssss',
+                        'sssssdissss',
                         $submission['productName'],
+                        $submission['barcode'],
+                        $barcodeImagePath,
                         $submission['productDescription'],
                         $submission['category'],
                         $submission['price'],
@@ -118,12 +135,13 @@ $params = [];
 $types = '';
 
 if ($search !== '') {
-    $where .= ' AND (productName LIKE ? OR productDescription LIKE ? OR category LIKE ?)';
+    $where .= ' AND (productName LIKE ? OR productDescription LIKE ? OR category LIKE ? OR barcode LIKE ?)';
     $like = '%' . $search . '%';
     $params[] = $like;
     $params[] = $like;
     $params[] = $like;
-    $types .= 'sss';
+    $params[] = $like;
+    $types .= 'ssss';
 }
 
 if ($categoryF !== '' && $categoryF !== 'All') {
@@ -132,7 +150,7 @@ if ($categoryF !== '' && $categoryF !== 'All') {
     $types .= 's';
 }
 
-$sql = "SELECT ps.submissionID, ps.userID, ps.productName, ps.productDescription, ps.category, ps.price, ps.stockQuantity, ps.imagePath, ps.expiryDate, ps.status, ps.rejectionReason, ps.created_at, u.firstName, u.lastName
+$sql = "SELECT ps.submissionID, ps.userID, ps.productName, ps.barcode, ps.barcodeImagePath, ps.productDescription, ps.category, ps.price, ps.stockQuantity, ps.imagePath, ps.expiryDate, ps.status, ps.rejectionReason, ps.created_at, u.firstName, u.lastName
         FROM product_submissions ps
         LEFT JOIN users u ON ps.userID = u.userID
         WHERE $where
@@ -302,7 +320,7 @@ $countStmt->close();
                     type="text"
                     name="q"
                     class="approval-search-input"
-                    placeholder="Search products..."
+                    placeholder="Search products or barcodes..."
                     value="<?php echo htmlspecialchars($search); ?>"
                 >
             </form>
@@ -359,6 +377,7 @@ $countStmt->close();
                                 </div>
                                 <div class="approval-card-meta">
                                     <span>RM<?php echo number_format($submission['price'], 2); ?></span>
+                                    <span>Barcode: <?php echo htmlspecialchars($submission['barcode'] ?: '-'); ?></span>
                                     <span><?php echo (int)$submission['stockQuantity']; ?> units</span>
                                     <span>Exp: <?php echo htmlspecialchars(formatDate($submission['expiryDate'])); ?></span>
                                     <span>Submitted: <?php echo htmlspecialchars(formatDateTime($submission['created_at'])); ?></span>
@@ -370,6 +389,13 @@ $countStmt->close();
                             <summary>View details</summary>
                             <div class="approval-details-body">
                                 <div class="approval-details-grid">
+                                    <div>
+                                        <strong>Barcode</strong>
+                                        <p><?php echo htmlspecialchars($submission['barcode'] ?: '-'); ?></p>
+                                        <?php if (!empty($submission['barcodeImagePath'])): ?>
+                                            <img src="<?php echo htmlspecialchars($submission['barcodeImagePath']); ?>" alt="Barcode for <?php echo htmlspecialchars($submission['productName']); ?>" class="approval-barcode-image">
+                                        <?php endif; ?>
+                                    </div>
                                     <div>
                                         <strong>Category</strong>
                                         <p><?php echo htmlspecialchars($displayCategory); ?></p>
