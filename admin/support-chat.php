@@ -181,7 +181,7 @@ function isContactOnline(string $lastActive): bool
             });
         });
     </script>
-    <link rel="stylesheet" href="css/admin-chat.css">
+    <link rel="stylesheet" href="css/admin-chat.css?v=2">
 </head>
 <body>
 <div class="admin-layout">
@@ -244,7 +244,7 @@ function isContactOnline(string $lastActive): bool
         </div>
     </aside>
 
-    <main class="main-content">
+    <main class="main-content support-chat-main">
         <header class="main-header">
             <div>
                 <h1>Support Chat</h1>

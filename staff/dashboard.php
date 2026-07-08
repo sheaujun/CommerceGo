@@ -19,48 +19,6 @@ $selectedCategory = trim($_GET['category'] ?? 'All');
 $perPage = 10;
 $page = max(1, (int)($_GET['page'] ?? 1));
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $action = $_POST['action'] ?? '';
-
-    if ($action === 'save_row' && isset($_POST['item_id'])) {
-        $itemId = (int) $_POST['item_id'];
-        $stockQuantity = max(0, (int) ($_POST['stock_quantity'] ?? 0));
-
-        $stmt = $conn->prepare(
-            'UPDATE products
-             SET physicalStock = ?, onlineStock = ?, stockQuantity = ?
-             WHERE productID = ?'
-        );
-        if ($stmt) {
-            $stmt->bind_param('iiii', $stockQuantity, $stockQuantity, $stockQuantity, $itemId);
-            if ($stmt->execute()) {
-                $message = 'Product stock saved successfully.';
-            } else {
-                $errors[] = 'Unable to save stock changes.';
-            }
-            $stmt->close();
-        } else {
-            $errors[] = 'Unable to prepare the save statement.';
-        }
-    }
-
-    if ($action === 'toggle_compliance' && isset($_POST['item_id'])) {
-        $itemId = (int) $_POST['item_id'];
-        $stmt = $conn->prepare('UPDATE products SET complianceStatus = IF(complianceStatus = \'Approved\', \'Pending\', \'Approved\') WHERE productID = ?');
-        if ($stmt) {
-            $stmt->bind_param('i', $itemId);
-            if ($stmt->execute()) {
-                $message = 'Compliance status updated.';
-            } else {
-                $errors[] = 'Unable to update compliance status.';
-            }
-            $stmt->close();
-        } else {
-            $errors[] = 'Unable to prepare the compliance statement.';
-        }
-    }
-}
-
 $where = '1=1';
 $params = [];
 $types = '';
@@ -300,17 +258,17 @@ function resolveProductImageUrl(string $path): string {
             <table>
                 <thead>
                     <tr>
+                        <th class="no-col">No</th>
                         <th>Product Name</th>
-                        <th>Product ID</th>
                         <th>Stock</th>
                         <th>Compliance</th>
                         <th>Expiry Date</th>
-                        <th class="actions-col">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
-                    <?php foreach ($filteredInventory as $item): ?>
+                    <?php foreach ($filteredInventory as $index => $item): ?>
                         <tr>
+                            <td class="no-col"><?php echo $offset + $index + 1; ?></td>
                             <td class="product-cell">
                                 <?php $productImageUrl = resolveProductImageUrl($item['imagePath'] ?? ''); ?>
                                 <?php if ($productImageUrl !== ''): ?>
@@ -320,35 +278,19 @@ function resolveProductImageUrl(string $path): string {
                                 <?php endif; ?>
                                 <span><?php echo htmlspecialchars($item['productName']); ?></span>
                             </td>
-                            <td>#<?php echo htmlspecialchars($item['productID']); ?></td>
                             <td>
-                                <input type="number" name="stock_quantity" value="<?php echo (int)$item['stockQuantity']; ?>" min="0" class="stock-input" form="save-form-<?php echo $item['productID']; ?>" readonly data-original-stock="<?php echo (int)$item['stockQuantity']; ?>">
+                                <span class="stock-display"><?php echo (int)$item['stockQuantity']; ?></span>
                             </td>
                             <td>
-                                <button type="submit" class="compliance-toggle <?php echo ($item['complianceStatus'] === 'Approved') ? 'compliant' : 'pending'; ?>" form="toggle-form-<?php echo $item['productID']; ?>">
+                                <span class="compliance-toggle <?php echo ($item['complianceStatus'] === 'Approved') ? 'compliant' : 'pending'; ?>">
                                     <span><?php echo ($item['complianceStatus'] === 'Approved') ? 'Verified' : 'Pending'; ?></span>
-                                </button>
+                                </span>
                             </td>
                             <td class="expiry-cell <?php echo isExpired($item['expiryDate']) ? 'expired' : (isExpiringSoon($item['expiryDate']) ? 'expiring-soon' : ''); ?>">
                                 <?php echo formatDate($item['expiryDate']); ?>
                                 <?php if (isExpiringSoon($item['expiryDate']) && !isExpired($item['expiryDate'])): ?>
                                     <span class="tag">Expiring Soon</span>
                                 <?php endif; ?>
-                            </td>
-                            <td class="actions-col">
-                                <button type="button" class="btn-icon edit-stock-btn" data-form-id="save-form-<?php echo $item['productID']; ?>">Edit</button>
-                            </td>
-                        </tr>
-                        <tr class="hidden-row">
-                            <td colspan="6">
-                                <form id="save-form-<?php echo $item['productID']; ?>" method="post" action="dashboard.php" class="hidden-form">
-                                    <input type="hidden" name="action" value="save_row">
-                                    <input type="hidden" name="item_id" value="<?php echo $item['productID']; ?>">
-                                </form>
-                                <form id="toggle-form-<?php echo $item['productID']; ?>" method="post" action="dashboard.php" class="hidden-form">
-                                    <input type="hidden" name="action" value="toggle_compliance">
-                                    <input type="hidden" name="item_id" value="<?php echo $item['productID']; ?>">
-                                </form>
                             </td>
                         </tr>
                     <?php endforeach; ?>
@@ -393,29 +335,6 @@ function resolveProductImageUrl(string $path): string {
             sidebarToggle.setAttribute('aria-pressed', collapsed.toString());
         });
     }
-
-    document.querySelectorAll('.edit-stock-btn').forEach((button) => {
-        button.addEventListener('click', () => {
-            const formId = button.dataset.formId;
-            const input = document.querySelector(`input[name="stock_quantity"][form="${formId}"]`);
-            const form = document.getElementById(formId);
-
-            if (!input || !form) {
-                return;
-            }
-
-            if (input.hasAttribute('readonly')) {
-                input.removeAttribute('readonly');
-                input.focus();
-                input.select();
-                button.textContent = 'Save';
-                button.classList.add('saving');
-                return;
-            }
-
-            form.submit();
-        });
-    });
 </script>
 </body>
 </html>

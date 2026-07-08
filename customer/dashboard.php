@@ -142,7 +142,7 @@ function badgeLabel($stockQuantity) {
         <div class="sidebar-footer">
             <p class="support-title">Need help?</p>
             <p class="support-copy">Contact our pharmacist</p>
-            <a href="tel:18001234567" class="support-link">1-800-PHARMACY</a>
+            <a href="support-chat.php" class="support-link">Support Chat</a>
         </div>
     </aside>
 
@@ -152,9 +152,6 @@ function badgeLabel($stockQuantity) {
                 <p class="eyebrow">Products</p>
                 <h2>Browse our wide selection of pharmacy products.</h2>
             </div>
-            <button type="button" id="sidebar-toggle" class="sidebar-toggle" aria-label="Toggle sidebar">
-                <span class="toggle-icon">☰</span>
-            </button>
         </header>
 
         <?php if (isset($_SESSION['cart_message'])): ?>
@@ -252,10 +249,6 @@ function badgeLabel($stockQuantity) {
     </main>
 </div>
 <script>
-document.getElementById('sidebar-toggle').addEventListener('click', function() {
-    document.querySelector('.customer-layout').classList.toggle('collapsed');
-});
-
 function addToCart(productId, quantity) {
     // Disable the button temporarily
     const button = event.target;

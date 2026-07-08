@@ -281,7 +281,7 @@ if ($orderStats['total_spent'] >= 500) {
         <div class="sidebar-footer">
             <p class="support-title">Need help?</p>
             <p class="support-copy">Contact our pharmacist</p>
-            <a href="tel:18001234567" class="support-link">1-800-PHARMACY</a>
+            <a href="support-chat.php" class="support-link">Support Chat</a>
         </div>
     </aside>
 
@@ -291,9 +291,6 @@ if ($orderStats['total_spent'] >= 500) {
                 <p class="eyebrow">Profile</p>
                 <h2>Manage your profile and account settings.</h2>
             </div>
-            <button type="button" id="sidebar-toggle" class="sidebar-toggle" aria-label="Toggle sidebar" aria-pressed="false">
-                <span class="toggle-icon">☰</span>
-            </button>
         </header>
 
         <?php if (!empty($errors)): ?>
@@ -470,14 +467,6 @@ if ($orderStats['total_spent'] >= 500) {
             document.getElementById(button.dataset.tab).classList.add('active');
         });
     });
-    const sidebarToggle = document.getElementById('sidebar-toggle');
-    const customerLayout = document.querySelector('.customer-layout');
-    if (sidebarToggle && customerLayout) {
-        sidebarToggle.addEventListener('click', function () {
-            const collapsed = customerLayout.classList.toggle('collapsed');
-            sidebarToggle.setAttribute('aria-pressed', collapsed.toString());
-        });
-    }
 </script>
 </body>
 </html>

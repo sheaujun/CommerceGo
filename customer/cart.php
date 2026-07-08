@@ -228,7 +228,7 @@ function resolveImageUrl($imagePath) {
         <div class="sidebar-footer">
             <p class="support-title">Need help?</p>
             <p class="support-copy">Contact our pharmacist</p>
-            <a href="tel:18001234567" class="support-link">1-800-PHARMACY</a>
+            <a href="support-chat.php" class="support-link">Support Chat</a>
         </div>
     </aside>
 
@@ -238,9 +238,6 @@ function resolveImageUrl($imagePath) {
                 <p class="eyebrow">Shopping Cart</p>
                 <h2>Review your items before checkout.</h2>
             </div>
-            <button type="button" id="sidebar-toggle" class="sidebar-toggle" aria-label="Toggle sidebar">
-                <span class="toggle-icon">☰</span>
-            </button>
         </header>
 
         <?php if (empty($cartItems)): ?>
@@ -338,10 +335,6 @@ function resolveImageUrl($imagePath) {
 </div>
 
 <script>
-document.getElementById('sidebar-toggle').addEventListener('click', function() {
-    document.querySelector('.customer-layout').classList.toggle('collapsed');
-});
-
 function changeQuantity(btn, delta) {
     const form = btn.closest('.quantity-form');
     const input = form.querySelector('.qty-input');

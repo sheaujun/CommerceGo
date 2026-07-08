@@ -291,7 +291,7 @@ if ($readStmt) {
         <div class="sidebar-footer">
             <p class="support-title">Need help?</p>
             <p class="support-copy">Contact our pharmacist</p>
-            <a href="tel:18001234567" class="support-link">1-800-PHARMACY</a>
+            <a href="support-chat.php" class="support-link">Support Chat</a>
         </div>
     </aside>
 
@@ -371,6 +371,10 @@ if ($readStmt) {
     const chatBody = document.querySelector('.chat-body');
     const adminMessageInput = document.getElementById('adminMessageInput');
     const askAiButton = document.getElementById('askAiButton');
+
+    if (chatBody) {
+        chatBody.scrollTop = chatBody.scrollHeight;
+    }
 
     function currentTimeLabel() {
         return new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });

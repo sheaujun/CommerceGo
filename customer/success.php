@@ -1,6 +1,7 @@
 <?php
 session_start();
 require_once __DIR__ . '/../db.php';
+require_once __DIR__ . '/../includes/app-config.php';
 require_once __DIR__ . '/../includes/product-expiry.php';
 require_once __DIR__ . '/../vendor/autoload.php';
 
@@ -315,7 +316,7 @@ function generateOrderCode(mysqli $conn): string
         <div class="sidebar-footer">
             <p class="support-title">Need help?</p>
             <p class="support-copy">Contact our pharmacist</p>
-            <a href="tel:18001234567" class="support-link">1-800-PHARMACY</a>
+            <a href="support-chat.php" class="support-link">Support Chat</a>
         </div>
     </aside>
 
@@ -325,9 +326,6 @@ function generateOrderCode(mysqli $conn): string
                 <p class="eyebrow">Payment Status</p>
                 <h2><?php echo htmlspecialchars($message); ?></h2>
             </div>
-            <button type="button" id="sidebar-toggle" class="sidebar-toggle" aria-label="Toggle sidebar">
-                <span class="toggle-icon">&#9776;</span>
-            </button>
         </header>
 
         <div class="empty-cart" style="text-align: center;">
@@ -346,10 +344,5 @@ function generateOrderCode(mysqli $conn): string
     </main>
 </div>
 
-<script>
-document.getElementById('sidebar-toggle').addEventListener('click', function() {
-    document.querySelector('.customer-layout').classList.toggle('collapsed');
-});
-</script>
 </body>
 </html>

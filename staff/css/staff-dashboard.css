@@ -381,6 +381,12 @@ th {
     color: #6b7280;
 }
 
+.no-col {
+    width: 54px;
+    color: #6b7280;
+    font-weight: 600;
+}
+
 tbody tr {
     border-bottom: 1px solid #f3f4f6;
 }
@@ -435,6 +441,12 @@ tbody tr:hover {
     cursor: default;
 }
 
+.stock-display {
+    display: inline-block;
+    color: #374151;
+    font-weight: 600;
+}
+
 .stock-input:not([readonly]) {
     border-color: #4f46e5;
     box-shadow: 0 0 0 4px rgba(79, 70, 229, 0.12);
@@ -461,7 +473,7 @@ tbody tr:hover {
     border-radius: 999px;
     font-size: 13px;
     font-weight: 600;
-    cursor: pointer;
+    cursor: default;
 }
 
 .compliance-toggle.compliant {

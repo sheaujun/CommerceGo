@@ -1,14 +1,16 @@
 <?php
+// Database connection using MySQLi
+
 require_once __DIR__ . '/includes/app-config.php';
 
-$commercegoConfig = commercego_config();
+$config = commercego_config();
 
-$conn = new mysqli(
-    $commercegoConfig['db_host'],
-    $commercegoConfig['db_user'],
-    $commercegoConfig['db_pass'],
-    $commercegoConfig['db_name']
-);
+$db_host = $config['db_host'];
+$db_user = $config['db_user'];
+$db_pass = $config['db_pass'];
+$db_name = $config['db_name'];
+
+$conn = new mysqli($db_host, $db_user, $db_pass, $db_name);
 
 if ($conn->connect_error) {
     die('Database connection failed: ' . $conn->connect_error);

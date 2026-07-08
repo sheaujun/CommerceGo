@@ -1,6 +1,7 @@
 <?php
 session_start();
 require_once __DIR__ . '/../db.php';
+require_once __DIR__ . '/../includes/app-config.php';
 require_once __DIR__ . '/../includes/product-expiry.php';
 require_once __DIR__ . '/../vendor/autoload.php'; // Stripe autoload
 
@@ -65,7 +66,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ];
             }, $cartItems),
             'mode' => 'payment',
-            'success_url' => commercego_app_url('customer/success.php') . '?session_id={CHECKOUT_SESSION_ID}',
+            'success_url' => commercego_app_url('customer/success.php?session_id={CHECKOUT_SESSION_ID}'),
             'cancel_url' => commercego_app_url('customer/cart.php'),
             'metadata' => [
                 'user_id' => $userID,
@@ -134,7 +135,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <div class="sidebar-footer">
             <p class="support-title">Need help?</p>
             <p class="support-copy">Contact our pharmacist</p>
-            <a href="tel:18001234567" class="support-link">1-800-PHARMACY</a>
+            <a href="support-chat.php" class="support-link">Support Chat</a>
         </div>
     </aside>
 
@@ -144,9 +145,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <p class="eyebrow">Checkout</p>
                 <h2>Complete your purchase</h2>
             </div>
-            <button type="button" id="sidebar-toggle" class="sidebar-toggle" aria-label="Toggle sidebar">
-                <span class="toggle-icon">☰</span>
-            </button>
         </header>
 
         <div class="cart-layout">
@@ -201,10 +199,5 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     </main>
 </div>
 
-<script>
-document.getElementById('sidebar-toggle').addEventListener('click', function() {
-    document.querySelector('.customer-layout').classList.toggle('collapsed');
-});
-</script>
 </body>
 </html>

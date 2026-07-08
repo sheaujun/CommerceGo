@@ -214,15 +214,19 @@
     color: #166534;
 }
 
-.order-status.shipped {
+.order-status.pending {
+    background-color: #fef3c7;
+    color: #92400e;
+}
+
+.order-status.processing {
     background-color: #dbeafe;
     color: #1d4ed8;
 }
 
-.order-status.processing,
-.order-status.pending {
-    background-color: #fef3c7;
-    color: #b45309;
+.order-status.shipped {
+    background-color: #ede9fe;
+    color: #6d28d9;
 }
 
 .order-status.cancelled {

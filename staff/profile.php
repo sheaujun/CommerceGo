@@ -182,7 +182,7 @@ $joinDate = $user['created_at'] ? date('Y-m-d', strtotime($user['created_at'])) 
             });
         });
     </script>
-    <link rel="stylesheet" href="css/staff-profile.css">
+    <link rel="stylesheet" href="css/staff-profile.css?v=2">
 </head>
 <body>
 <div class="staff-layout">
@@ -346,7 +346,7 @@ $joinDate = $user['created_at'] ? date('Y-m-d', strtotime($user['created_at'])) 
                         </div>
                         <div class="field-group">
                             <label for="avatar">Upload Profile Photo</label>
-                            <input type="file" id="avatar" name="avatar" accept="image/jpeg,image/png,image/gif">
+                            <input type="file" id="avatar" name="avatar" accept="image/jpeg,image/png,image/gif" class="styled-file-input">
                         </div>
                         <div class="field-group">
                             <div id="avatarPreviewContainer" class="avatar-preview-container" style="display:none;">

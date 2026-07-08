@@ -172,7 +172,7 @@ $categoryResult = $conn->query('SELECT category FROM products UNION SELECT categ
 if ($categoryResult) {
     while ($categoryRow = $categoryResult->fetch_assoc()) {
         $categoryName = trim((string) ($categoryRow['category'] ?? ''));
-        if ($categoryName !== '' && !in_array(strtolower($categoryName), array_map('strtolower', $categoryNames), true)) {
+        if ($categoryName !== '' && $categoryName !== '0' && !in_array(strtolower($categoryName), array_map('strtolower', $categoryNames), true)) {
             $categoryNames[] = $categoryName;
         }
     }

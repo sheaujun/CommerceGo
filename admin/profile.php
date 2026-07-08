@@ -182,7 +182,7 @@ $joinDate = $user['created_at'] ? date('Y-m-d', strtotime($user['created_at'])) 
             });
         });
     </script>
-    <link rel="stylesheet" href="css/admin-profile.css">
+    <link rel="stylesheet" href="css/admin-profile.css?v=2">
 </head>
 <body>
 <div class="admin-layout">

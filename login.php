@@ -140,8 +140,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <div class="auth-footer">
             <span>New to CommerceGo?</span>
             <a href="register.php">Create an account</a>
-            <br>
-            <a href="forgot_password.php">Forgot your password?</a>
         </div>
     </div>
 </div>

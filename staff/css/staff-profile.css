@@ -167,6 +167,54 @@ body {
     border-color: #a5b4fc;
 }
 
+.field-group input.styled-file-input {
+    padding: 5px;
+    border-color: #d8b4fe;
+    background: #ffffff;
+    color: #6b7280;
+    cursor: pointer;
+}
+
+.field-group input.styled-file-input::file-selector-button {
+    margin-right: 12px;
+    padding: 9px 16px;
+    border: 0;
+    border-radius: 10px;
+    background: linear-gradient(135deg, #7c3aed, #5b21b6);
+    color: #ffffff;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    box-shadow: 0 8px 18px rgba(91, 33, 182, 0.24);
+    transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease;
+}
+
+.field-group input.styled-file-input::-webkit-file-upload-button {
+    margin-right: 12px;
+    padding: 9px 16px;
+    border: 0;
+    border-radius: 10px;
+    background: linear-gradient(135deg, #7c3aed, #5b21b6);
+    color: #ffffff;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    box-shadow: 0 8px 18px rgba(91, 33, 182, 0.24);
+    transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease;
+}
+
+.field-group input.styled-file-input::file-selector-button:hover {
+    filter: brightness(1.05);
+    transform: translateY(-1px);
+    box-shadow: 0 10px 22px rgba(91, 33, 182, 0.3);
+}
+
+.field-group input.styled-file-input::-webkit-file-upload-button:hover {
+    filter: brightness(1.05);
+    transform: translateY(-1px);
+    box-shadow: 0 10px 22px rgba(91, 33, 182, 0.3);
+}
+
 .avatar-preview-container {
     display: none;
     flex-direction: column;

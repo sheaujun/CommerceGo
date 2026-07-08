@@ -45,7 +45,7 @@ $whatsAppNumber = preg_replace('/\D+/', '', (string) ($mapConfig['whatsapp_numbe
         </div>
         <div class="sidebar-footer">
             <p class="support-title">Need help?</p><p class="support-copy">Contact our pharmacist</p>
-            <a href="tel:<?php echo $escape((string) $mapConfig['phone']); ?>" class="support-link">1-800-PHARMACY</a>
+            <a href="support-chat.php" class="support-link">Support Chat</a>
         </div>
     </aside>
     <main class="main-content find-us-content">
