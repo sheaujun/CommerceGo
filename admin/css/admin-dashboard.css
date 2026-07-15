@@ -282,30 +282,113 @@ body {
 }
 
 .alerts-card {
-    min-height: 220px;
+    min-height: 320px;
 }
 
 .alerts-list {
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    margin-top: 6px;
+    gap: 14px;
+    margin-top: 18px;
 }
 
-.alert-pill {
-    padding: 8px 10px;
-    border-radius: 10px;
-    font-size: 12px;
+.alert-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 16px;
+    border-radius: 16px;
+    border: 1px solid transparent;
+    min-height: 86px;
+    box-sizing: border-box;
 }
 
-.alert-pill.warning {
-    background-color: #fef3c7;
+.alert-icon {
+    width: 58px;
+    height: 58px;
+    border-radius: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 58px;
+    font-size: 32px;
+    line-height: 1;
+    color: #ffffff;
+    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.14);
+}
+
+.alert-copy {
+    min-width: 0;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.alert-copy strong {
+    font-size: 18px;
+    line-height: 1.2;
+    font-weight: 800;
+}
+
+.alert-copy span {
+    font-size: 14px;
+    line-height: 1.35;
+    color: #1f2937;
+}
+
+.alert-count {
+    flex: 0 0 auto;
+    min-width: 32px;
+    text-align: right;
+    font-size: 40px;
+    line-height: 1;
+    font-weight: 800;
+}
+
+.alert-row.warning {
+    background-color: #fffaf0;
+    border-color: #fde68a;
     color: #92400e;
 }
 
-.alert-pill.info {
-    background-color: #eef2ff;
-    color: #4338ca;
+.alert-row.warning .alert-icon {
+    background: linear-gradient(135deg, #fbbf24, #f59e0b);
+}
+
+.alert-row.warning .alert-copy strong,
+.alert-row.warning .alert-count {
+    color: #f59e0b;
+}
+
+.alert-row.danger {
+    background-color: #fff5f5;
+    border-color: #fecaca;
+    color: #991b1b;
+}
+
+.alert-row.danger .alert-icon {
+    background: linear-gradient(135deg, #f43f5e, #dc2626);
+}
+
+.alert-row.danger .alert-copy strong,
+.alert-row.danger .alert-count {
+    color: #dc2626;
+}
+
+.alert-row.info {
+    background-color: #f0fdf4;
+    border-color: #bbf7d0;
+    color: #16a34a;
+}
+
+.alert-row.info .alert-icon {
+    background: linear-gradient(135deg, #22c55e, #16a34a);
+}
+
+.alert-row.info .alert-copy strong,
+.alert-row.info .alert-count {
+    color: #16a34a;
 }
 
 /* Bottom row: recent orders + top products */

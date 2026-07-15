@@ -16,10 +16,15 @@ $userID = $_SESSION['userID'];
 
 // Get cart items
 $sql = "SELECT c.cart_id, c.quantity, p.productID, p.productName, p.price,
-               p.stockQuantity AS availableStock
+               p.stockQuantity AS availableStock, p.imagePath
         FROM cart c
         JOIN products p ON c.product_id = p.productID
-        WHERE c.user_id = ? AND p.status = 'Active' AND p.complianceStatus = 'Approved' AND (p.expiryDate IS NULL OR p.expiryDate >= CURDATE())
+        WHERE c.user_id = ?
+          AND p.status = 'Active'
+          AND p.complianceStatus = 'Approved'
+          AND (p.expiryDate IS NULL OR p.expiryDate >= CURDATE())
+          AND p.stockQuantity > 0
+          AND c.quantity <= p.stockQuantity
         ORDER BY c.added_at DESC";
 
 $stmt = $conn->prepare($sql);
@@ -30,6 +35,7 @@ $cartItems = $result->fetch_all(MYSQLI_ASSOC);
 $stmt->close();
 
 if (empty($cartItems)) {
+    $_SESSION['cart_message'] = 'Some cart items are sold out or no longer available.';
     header('Location: cart.php');
     exit;
 }
@@ -38,6 +44,28 @@ if (empty($cartItems)) {
 $total = 0;
 foreach ($cartItems as $item) {
     $total += $item['price'] * $item['quantity'];
+}
+
+function resolveImageUrl($imagePath) {
+    $imagePath = trim((string) $imagePath);
+    if ($imagePath === '') {
+        return null;
+    }
+    if (filter_var($imagePath, FILTER_VALIDATE_URL)) {
+        return $imagePath;
+    }
+
+    $imagePath = ltrim($imagePath, '/');
+
+    if (str_starts_with($imagePath, 'admin/')) {
+        return '../' . $imagePath;
+    }
+
+    if (str_starts_with($imagePath, 'uploads/')) {
+        return '../admin/' . $imagePath;
+    }
+
+    return '../admin/' . $imagePath;
 }
 
 $stripeSecretKey = commercego_stripe_secret_key();
@@ -150,14 +178,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <div class="cart-layout">
             <div class="cart-items-section">
                 <h3>Order Summary</h3>
-                <div class="cart-items">
+                <div class="checkout-items">
                     <?php foreach ($cartItems as $item): ?>
-                        <div class="cart-item">
-                            <div class="item-details">
-                                <h4><?php echo htmlspecialchars($item['productName']); ?></h4>
-                                <div class="item-price">RM <?php echo number_format($item['price'], 2); ?> x <?php echo $item['quantity']; ?></div>
+                        <?php $imageUrl = resolveImageUrl($item['imagePath'] ?? ''); ?>
+                        <div class="checkout-item">
+                            <div class="checkout-item-image">
+                                <?php if ($imageUrl): ?>
+                                    <img src="<?php echo htmlspecialchars($imageUrl); ?>" alt="<?php echo htmlspecialchars($item['productName']); ?>">
+                                <?php else: ?>
+                                    <span>Rx</span>
+                                <?php endif; ?>
                             </div>
-                            <div class="item-total">
+                            <div class="checkout-item-main">
+                                <h4><?php echo htmlspecialchars($item['productName']); ?></h4>
+                                <div class="checkout-item-meta">
+                                    <span>RM <?php echo number_format($item['price'], 2); ?></span>
+                                    <span>x <?php echo (int) $item['quantity']; ?></span>
+                                </div>
+                            </div>
+                            <div class="checkout-item-total">
                                 RM <?php echo number_format($item['price'] * $item['quantity'], 2); ?>
                             </div>
                         </div>
@@ -192,7 +231,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         <button type="submit" class="checkout-btn">Pay Here</button>
                     </form>
 
-                    <a href="cart.php" class="secondary-button" style="display: block; text-align: center; margin-top: 10px;">Back to Cart</a>
+                    <a href="cart.php" class="secondary-button checkout-back-btn">Back to Cart</a>
                 </div>
             </div>
         </div>

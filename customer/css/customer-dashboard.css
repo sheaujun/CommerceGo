@@ -285,6 +285,20 @@ body {
     box-shadow: 0 16px 34px rgba(15, 23, 42, 0.05);
 }
 
+.product-card.sold-out {
+    background: #f9fafb;
+}
+
+.product-card.sold-out .product-card-top {
+    overflow: hidden;
+}
+
+.product-card.sold-out .product-media img,
+.product-card.sold-out .product-icon {
+    filter: grayscale(0.25);
+    opacity: 0.9;
+}
+
 .product-card-top {
     position: relative;
     background: #f8f8ff;
@@ -309,7 +323,15 @@ body {
     background: #fef3c7;
 }
 
+.status-badge.sold-out {
+    color: #b45309;
+    background: linear-gradient(135deg, #fef3c7, #fde68a);
+    font-size: 0.95rem;
+    padding: 10px 20px;
+}
+
 .product-media {
+    position: relative;
     width: 110px;
     height: 110px;
     border-radius: 50%;
@@ -317,6 +339,23 @@ body {
     display: grid;
     place-items: center;
     overflow: hidden;
+}
+
+.sold-out-ribbon {
+    position: absolute;
+    top: 20px;
+    left: 34px;
+    width: 108px;
+    padding: 5px 0;
+    transform: rotate(-45deg);
+    background: linear-gradient(135deg, #ef4444, #dc2626);
+    color: #ffffff;
+    font-size: 10px;
+    font-weight: 800;
+    text-align: center;
+    text-transform: uppercase;
+    box-shadow: 0 8px 18px rgba(220, 38, 38, 0.22);
+    z-index: 2;
 }
 
 .product-media img {
@@ -365,6 +404,10 @@ body {
     gap: 16px;
 }
 
+.product-card.sold-out .product-card-footer {
+    gap: 10px;
+}
+
 .price {
     font-size: 1.2rem;
     font-weight: 800;
@@ -392,6 +435,25 @@ body {
 .add-button:hover {
     transform: translateY(-1px);
     background: #312e81;
+}
+
+.add-button.sold-out,
+.add-button.sold-out:hover,
+.add-button:disabled {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: #e5e7eb;
+    color: #4b5563;
+    cursor: not-allowed;
+    padding: 12px 18px;
+    border-radius: 16px;
+    transform: none;
+}
+
+.add-button-icon {
+    font-size: 18px;
+    line-height: 1;
 }
 
 .empty-state {

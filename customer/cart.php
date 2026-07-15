@@ -11,6 +11,8 @@ if (!isset($_SESSION['userID']) || ($_SESSION['role'] ?? '') !== 'customer') {
 disableExpiredProducts($conn);
 
 $userID = $_SESSION['userID'];
+$cartMessage = $_SESSION['cart_message'] ?? '';
+unset($_SESSION['cart_message']);
 
 // Get cart count
 $cartCountResult = $conn->query("SELECT SUM(quantity) as total FROM cart WHERE user_id = $userID");
@@ -53,21 +55,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt->close();
 
             if ($cartItem) {
-                // Update quantity
-                $newQuantity = min($cartItem['quantity'] + $quantity, (int) $product['availableStock']);
-                $stmt = $conn->prepare("UPDATE cart SET quantity = ? WHERE cart_id = ?");
-                $stmt->bind_param('ii', $newQuantity, $cartItem['cart_id']);
-                $stmt->execute();
-                $stmt->close();
-                $response = ['success' => true, 'message' => 'Item quantity updated in cart!'];
+                // Update quantity only when enough stock remains beyond what is already in cart.
+                $newQuantity = $cartItem['quantity'] + $quantity;
+                if ($newQuantity <= (int) $product['availableStock']) {
+                    $stmt = $conn->prepare("UPDATE cart SET quantity = ? WHERE cart_id = ?");
+                    $stmt->bind_param('ii', $newQuantity, $cartItem['cart_id']);
+                    $stmt->execute();
+                    $stmt->close();
+                    $response = ['success' => true, 'message' => 'Item quantity updated in cart!'];
+                } else {
+                    $response = ['success' => false, 'message' => 'Not enough stock available. You already have the available quantity in your cart.'];
+                }
             } else {
                 // Add new item
-                $quantity = min($quantity, (int) $product['availableStock']);
-                $stmt = $conn->prepare("INSERT INTO cart (user_id, product_id, quantity) VALUES (?, ?, ?)");
-                $stmt->bind_param('iii', $userID, $productID, $quantity);
-                $stmt->execute();
-                $stmt->close();
-                $response = ['success' => true, 'message' => 'Item added to cart!'];
+                if ($quantity <= (int) $product['availableStock']) {
+                    $stmt = $conn->prepare("INSERT INTO cart (user_id, product_id, quantity) VALUES (?, ?, ?)");
+                    $stmt->bind_param('iii', $userID, $productID, $quantity);
+                    $stmt->execute();
+                    $stmt->close();
+                    $response = ['success' => true, 'message' => 'Item added to cart!'];
+                } else {
+                    $response = ['success' => false, 'message' => 'Not enough stock available.'];
+                }
             }
         } else {
             $response = ['success' => false, 'message' => 'Sorry, this item is currently unavailable.'];
@@ -130,10 +139,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 // Get cart items
 $sql = "SELECT c.cart_id, c.quantity, p.productID, p.productName, p.productDescription, p.price,
-               p.stockQuantity AS availableStock, p.imagePath
+               p.stockQuantity AS availableStock, p.imagePath, p.status, p.complianceStatus, p.expiryDate
         FROM cart c
         JOIN products p ON c.product_id = p.productID
-        WHERE c.user_id = ? AND p.status = 'Active' AND p.complianceStatus = 'Approved' AND (p.expiryDate IS NULL OR p.expiryDate >= CURDATE())
+        WHERE c.user_id = ?
         ORDER BY c.added_at DESC";
 
 $stmt = $conn->prepare($sql);
@@ -146,8 +155,18 @@ $stmt->close();
 // Calculate totals
 $total = 0;
 $itemCount = 0;
+$availableItemCount = 0;
 foreach ($cartItems as $item) {
-    $total += $item['price'] * $item['quantity'];
+    $isPurchasable = (int) $item['availableStock'] > 0
+        && $item['quantity'] <= (int) $item['availableStock']
+        && $item['status'] === 'Active'
+        && $item['complianceStatus'] === 'Approved'
+        && (empty($item['expiryDate']) || $item['expiryDate'] >= date('Y-m-d'));
+
+    if ($isPurchasable) {
+        $total += $item['price'] * $item['quantity'];
+        $availableItemCount += $item['quantity'];
+    }
     $itemCount += $item['quantity'];
 }
 
@@ -240,6 +259,10 @@ function resolveImageUrl($imagePath) {
             </div>
         </header>
 
+        <?php if ($cartMessage !== ''): ?>
+            <div class="cart-message"><?php echo htmlspecialchars($cartMessage); ?></div>
+        <?php endif; ?>
+
         <?php if (empty($cartItems)): ?>
             <div class="empty-cart">
                 <div class="empty-cart-icon">🛒</div>
@@ -260,9 +283,20 @@ function resolveImageUrl($imagePath) {
 
                     <div class="cart-items">
                         <?php foreach ($cartItems as $item): ?>
-                            <?php $imageUrl = resolveImageUrl($item['imagePath']); ?>
-                            <div class="cart-item">
+                            <?php
+                            $imageUrl = resolveImageUrl($item['imagePath']);
+                            $isPurchasable = (int) $item['availableStock'] > 0
+                                && $item['quantity'] <= (int) $item['availableStock']
+                                && $item['status'] === 'Active'
+                                && $item['complianceStatus'] === 'Approved'
+                                && (empty($item['expiryDate']) || $item['expiryDate'] >= date('Y-m-d'));
+                            $unavailableLabel = (int) $item['availableStock'] > 0 ? 'Not enough stock' : 'Product sold out';
+                            ?>
+                            <div class="cart-item <?php echo $isPurchasable ? '' : 'sold-out'; ?>">
                                 <div class="item-image">
+                                    <?php if (!$isPurchasable): ?>
+                                        <span class="sold-out-ribbon">Sold Out</span>
+                                    <?php endif; ?>
                                     <?php if ($imageUrl): ?>
                                         <img src="<?php echo htmlspecialchars($imageUrl); ?>" alt="<?php echo htmlspecialchars($item['productName']); ?>">
                                     <?php else: ?>
@@ -271,21 +305,28 @@ function resolveImageUrl($imagePath) {
                                 </div>
                                 <div class="item-details">
                                     <h4><?php echo htmlspecialchars($item['productName']); ?></h4>
+                                    <?php if (!$isPurchasable): ?>
+                                        <div class="sold-out-line"><?php echo htmlspecialchars($unavailableLabel); ?></div>
+                                    <?php endif; ?>
                                     <p><?php echo htmlspecialchars($item['productDescription'] ?: 'No description available.'); ?></p>
                                     <div class="item-price">RM <?php echo number_format($item['price'], 2); ?></div>
                                 </div>
                                 <div class="item-quantity">
-                                    <form method="post" class="quantity-form">
-                                        <input type="hidden" name="action" value="update">
-                                        <input type="hidden" name="product_id" value="<?php echo $item['productID']; ?>">
-                                        <button type="button" class="qty-btn" onclick="changeQuantity(this, -1)">-</button>
-                                        <input type="number" name="quantity" value="<?php echo $item['quantity']; ?>" min="1" max="<?php echo $item['availableStock']; ?>" class="qty-input">
-                                        <button type="button" class="qty-btn" onclick="changeQuantity(this, 1)">+</button>
-                                        <button type="submit" class="update-btn">Update</button>
-                                    </form>
+                                    <?php if ($isPurchasable): ?>
+                                        <form method="post" class="quantity-form">
+                                            <input type="hidden" name="action" value="update">
+                                            <input type="hidden" name="product_id" value="<?php echo $item['productID']; ?>">
+                                            <button type="button" class="qty-btn" onclick="changeQuantity(this, -1)">-</button>
+                                            <input type="number" name="quantity" value="<?php echo $item['quantity']; ?>" min="1" max="<?php echo $item['availableStock']; ?>" class="qty-input">
+                                            <button type="button" class="qty-btn" onclick="changeQuantity(this, 1)">+</button>
+                                            <button type="submit" class="update-btn">Update</button>
+                                        </form>
+                                    <?php else: ?>
+                                        <span class="sold-out-text" aria-hidden="true"></span>
+                                    <?php endif; ?>
                                 </div>
                                 <div class="item-total">
-                                    <div>RM <?php echo number_format($item['price'] * $item['quantity'], 2); ?></div>
+                                    <div class="<?php echo $isPurchasable ? '' : 'unavailable-text'; ?>"><?php echo $isPurchasable ? 'RM ' . number_format($item['price'] * $item['quantity'], 2) : 'UNAVAILABLE'; ?></div>
                                     <form method="post" style="display: inline;">
                                         <input type="hidden" name="action" value="remove">
                                         <input type="hidden" name="product_id" value="<?php echo $item['productID']; ?>">
@@ -306,9 +347,16 @@ function resolveImageUrl($imagePath) {
                         <h3>Order Summary</h3>
                         <div class="summary-items">
                             <?php foreach ($cartItems as $item): ?>
+                                <?php
+                                $isPurchasable = (int) $item['availableStock'] > 0
+                                    && $item['quantity'] <= (int) $item['availableStock']
+                                    && $item['status'] === 'Active'
+                                    && $item['complianceStatus'] === 'Approved'
+                                    && (empty($item['expiryDate']) || $item['expiryDate'] >= date('Y-m-d'));
+                                ?>
                                 <div class="summary-item">
                                     <span><?php echo htmlspecialchars($item['productName']); ?> x <?php echo $item['quantity']; ?></span>
-                                    <span>RM <?php echo number_format($item['price'] * $item['quantity'], 2); ?></span>
+                                    <span><?php echo $isPurchasable ? 'RM ' . number_format($item['price'] * $item['quantity'], 2) : 'Sold out'; ?></span>
                                 </div>
                             <?php endforeach; ?>
                         </div>
@@ -326,7 +374,12 @@ function resolveImageUrl($imagePath) {
                             <span>Total</span>
                             <span>RM <?php echo number_format($total, 2); ?></span>
                         </div>
-                        <a href="checkout.php" class="checkout-btn">Proceed to Checkout</a>
+                        <?php if ($availableItemCount > 0): ?>
+                            <a href="checkout.php" class="checkout-btn">Proceed to Checkout</a>
+                        <?php else: ?>
+                            <span class="checkout-btn disabled">Proceed to Checkout</span>
+                            <p class="checkout-note">Remove sold out products before checkout.</p>
+                        <?php endif; ?>
                     </div>
                 </div>
             </div>
@@ -344,7 +397,29 @@ function changeQuantity(btn, delta) {
 
     if (newValue >= 1 && newValue <= max) {
         input.value = newValue;
+    } else if (newValue > max) {
+        showCartMessage('Not enough stock available. You already have the available quantity in your cart.');
     }
+}
+
+function showCartMessage(message) {
+    const existingMessage = document.querySelector('.cart-message');
+    if (existingMessage) {
+        existingMessage.remove();
+    }
+
+    const messageDiv = document.createElement('div');
+    messageDiv.className = 'cart-message warning';
+    messageDiv.textContent = message;
+
+    const pageHeader = document.querySelector('.page-header');
+    pageHeader.insertAdjacentElement('afterend', messageDiv);
+
+    setTimeout(() => {
+        if (messageDiv.parentElement) {
+            messageDiv.remove();
+        }
+    }, 3500);
 }
 </script>
 </body>

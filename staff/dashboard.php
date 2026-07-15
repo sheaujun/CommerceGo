@@ -16,8 +16,10 @@ $success = '';
 $message = '';
 $searchQuery = trim($_GET['search'] ?? '');
 $selectedCategory = trim($_GET['category'] ?? 'All');
+$selectedStockFilter = trim($_GET['stock_filter'] ?? 'All');
 $perPage = 10;
 $page = max(1, (int)($_GET['page'] ?? 1));
+$lowStockThreshold = 50;
 
 $where = '1=1';
 $params = [];
@@ -34,6 +36,14 @@ if ($selectedCategory !== '' && $selectedCategory !== 'All') {
     $where .= ' AND category = ?';
     $params[] = $selectedCategory;
     $types .= 's';
+}
+
+if ($selectedStockFilter === 'low') {
+    $where .= ' AND stockQuantity < ?';
+    $params[] = $lowStockThreshold;
+    $types .= 'i';
+} elseif ($selectedStockFilter === 'expired') {
+    $where .= ' AND expiryDate IS NOT NULL AND expiryDate < CURDATE()';
 }
 
 $countSql = "SELECT COUNT(*) AS total FROM products WHERE $where";
@@ -53,6 +63,32 @@ if ($page > $totalPages) {
     $page = $totalPages;
 }
 $offset = ($page - 1) * $perPage;
+
+$lowStockSql = "SELECT COUNT(*) AS total FROM products WHERE $where AND stockQuantity < ?";
+$lowStockStmt = $conn->prepare($lowStockSql);
+$lowStockItems = 0;
+if ($lowStockStmt) {
+    $lowStockParams = array_merge($params, [$lowStockThreshold]);
+    $lowStockTypes = $types . 'i';
+    $lowStockStmt->bind_param($lowStockTypes, ...$lowStockParams);
+    $lowStockStmt->execute();
+    $lowStockResult = $lowStockStmt->get_result();
+    $lowStockItems = (int)($lowStockResult->fetch_assoc()['total'] ?? 0);
+    $lowStockStmt->close();
+}
+
+$expiredProductSql = "SELECT COUNT(*) AS total FROM products WHERE $where AND expiryDate IS NOT NULL AND expiryDate < CURDATE()";
+$expiredProductStmt = $conn->prepare($expiredProductSql);
+$expiredProductItems = 0;
+if ($expiredProductStmt) {
+    if (!empty($params)) {
+        $expiredProductStmt->bind_param($types, ...$params);
+    }
+    $expiredProductStmt->execute();
+    $expiredProductResult = $expiredProductStmt->get_result();
+    $expiredProductItems = (int)($expiredProductResult->fetch_assoc()['total'] ?? 0);
+    $expiredProductStmt->close();
+}
 
 $sql = "SELECT productID,
                productName,
@@ -102,7 +138,6 @@ if ($stmt) {
 }
 
 $pendingCompliance = count(array_filter($filteredInventory, fn($item) => $item['complianceStatus'] !== 'Approved'));
-$lowStockItems = count(array_filter($filteredInventory, fn($item) => $item['stockQuantity'] < 100));
 
 $pageBaseParams = [];
 if ($searchQuery !== '') {
@@ -110,6 +145,9 @@ if ($searchQuery !== '') {
 }
 if ($selectedCategory !== '' && $selectedCategory !== 'All') {
     $pageBaseParams['category'] = $selectedCategory;
+}
+if ($selectedStockFilter !== '' && $selectedStockFilter !== 'All') {
+    $pageBaseParams['stock_filter'] = $selectedStockFilter;
 }
 
 function isExpiringSoon($dateStr) {
@@ -221,6 +259,14 @@ function resolveProductImageUrl(string $path): string {
                         <?php endforeach; ?>
                     </select>
                 </label>
+                <label class="filter-field">
+                    <span class="filter-label">Status</span>
+                    <select name="stock_filter" class="filter-select" onchange="this.form.submit()">
+                        <option value="All"<?php echo $selectedStockFilter === 'All' ? ' selected' : ''; ?>>All Status</option>
+                        <option value="low"<?php echo $selectedStockFilter === 'low' ? ' selected' : ''; ?>>Low Stock</option>
+                        <option value="expired"<?php echo $selectedStockFilter === 'expired' ? ' selected' : ''; ?>>Expired Products</option>
+                    </select>
+                </label>
             </form>
         </div>
     </header>
@@ -251,6 +297,13 @@ function resolveProductImageUrl(string $path): string {
                 <p class="metric-value"><?php echo $lowStockItems; ?></p>
             </div>
         </article>
+        <article class="metric-card">
+            <div class="metric-icon">&#9200;</div>
+            <div>
+                <p class="metric-label">Expired Products</p>
+                <p class="metric-value"><?php echo $expiredProductItems; ?></p>
+            </div>
+        </article>
     </section>
 
     <section class="inventory-card">
@@ -279,7 +332,7 @@ function resolveProductImageUrl(string $path): string {
                                 <span><?php echo htmlspecialchars($item['productName']); ?></span>
                             </td>
                             <td>
-                                <span class="stock-display"><?php echo (int)$item['stockQuantity']; ?></span>
+                                <span class="stock-display <?php echo (int)$item['stockQuantity'] < $lowStockThreshold ? 'low-stock' : ''; ?>"><?php echo (int)$item['stockQuantity']; ?></span>
                             </td>
                             <td>
                                 <span class="compliance-toggle <?php echo ($item['complianceStatus'] === 'Approved') ? 'compliant' : 'pending'; ?>">

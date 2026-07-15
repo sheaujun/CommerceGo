@@ -81,6 +81,9 @@ function resolveImageUrl($imagePath) {
 }
 
 function badgeLabel($stockQuantity) {
+    if ($stockQuantity <= 0) {
+        return 'Sold Out';
+    }
     if ($stockQuantity <= 12) {
         return 'Low Stock';
     }
@@ -93,7 +96,7 @@ function badgeLabel($stockQuantity) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Essen Pharmacy - Customer Dashboard</title>
-    <link rel="stylesheet" href="css/customer-dashboard.css">
+    <link rel="stylesheet" href="css/customer-dashboard.css?v=2">
 </head>
 <body>
 <div class="customer-layout">
@@ -216,12 +219,17 @@ function badgeLabel($stockQuantity) {
                 <?php foreach ($products as $product): ?>
                     <?php
                         $imageUrl = resolveImageUrl($product['imagePath']);
-                        $badge = badgeLabel((int)$product['availableStock']);
+                        $availableStock = (int)$product['availableStock'];
+                        $isSoldOut = $availableStock <= 0;
+                        $badge = badgeLabel($availableStock);
                     ?>
-                    <article class="product-card">
+                    <article class="product-card <?php echo $isSoldOut ? 'sold-out' : ''; ?>">
                         <div class="product-card-top">
-                            <?php if ($badge !== ''): ?>
-                                <span class="status-badge low-stock"><?php echo htmlspecialchars($badge); ?></span>
+                            <?php if ($badge !== '' && !$isSoldOut): ?>
+                                <span class="status-badge <?php echo $isSoldOut ? 'sold-out' : 'low-stock'; ?>"><?php echo htmlspecialchars($badge); ?></span>
+                            <?php endif; ?>
+                            <?php if ($isSoldOut): ?>
+                                <span class="sold-out-ribbon">SOLD OUT</span>
                             <?php endif; ?>
                             <div class="product-media">
                                 <?php if ($imageUrl): ?>
@@ -240,7 +248,11 @@ function badgeLabel($stockQuantity) {
                             <div>
                                 <div class="price">RM <?php echo number_format($product['price'], 2); ?></div>
                             </div>
-                            <button type="button" class="add-button" onclick="addToCart(<?php echo $product['productID']; ?>, 1)">Add to Cart</button>
+                            <?php if ($isSoldOut): ?>
+                                <button type="button" class="add-button sold-out" disabled> Add to Cart</button>
+                            <?php else: ?>
+                                <button type="button" class="add-button" onclick="addToCart(<?php echo $product['productID']; ?>, 1)">Add to Cart</button>
+                            <?php endif; ?>
                         </div>
                     </article>
                 <?php endforeach; ?>

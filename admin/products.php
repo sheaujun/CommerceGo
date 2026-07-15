@@ -285,7 +285,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
 // List and filters
 $search    = trim($_GET['q'] ?? '');
 $categoryF = trim($_GET['cat'] ?? '');
+$stockF = trim($_GET['stock_filter'] ?? 'All');
 $addedF = trim($_GET['added'] ?? 'All');
+$lowStockThreshold = 50;
 $perPage = 10;
 $page = max(1, (int)($_GET['page'] ?? 1));
 $where     = '1=1';
@@ -305,6 +307,14 @@ if ($categoryF !== '' && $categoryF !== 'All') {
     $where .= ' AND category = ?';
     $params[] = $categoryF;
     $types .= 's';
+}
+
+if ($stockF === 'low') {
+    $where .= ' AND stockQuantity <= ?';
+    $params[] = $lowStockThreshold;
+    $types .= 'i';
+} elseif ($stockF === 'expired') {
+    $where .= ' AND expiryDate IS NOT NULL AND expiryDate < CURDATE()';
 }
 
 if ($addedF === 'recent') {
@@ -350,6 +360,9 @@ if ($search !== '') {
 }
 if ($categoryF !== '' && $categoryF !== 'All') {
     $pageBaseParams['cat'] = $categoryF;
+}
+if ($stockF !== '' && $stockF !== 'All') {
+    $pageBaseParams['stock_filter'] = $stockF;
 }
 if ($addedF !== '' && $addedF !== 'All') {
     $pageBaseParams['added'] = $addedF;
@@ -495,6 +508,9 @@ $categoryNames = array_values($categoryNames);
                     <?php if ($addedF !== '' && $addedF !== 'All'): ?>
                         <input type="hidden" name="added" value="<?php echo htmlspecialchars($addedF); ?>">
                     <?php endif; ?>
+                    <?php if ($stockF !== '' && $stockF !== 'All'): ?>
+                        <input type="hidden" name="stock_filter" value="<?php echo htmlspecialchars($stockF); ?>">
+                    <?php endif; ?>
                     <input
                         type="text"
                         name="q"
@@ -511,6 +527,9 @@ $categoryNames = array_values($categoryNames);
                     <?php endif; ?>
                     <?php if ($addedF !== '' && $addedF !== 'All'): ?>
                         <input type="hidden" name="added" value="<?php echo htmlspecialchars($addedF); ?>">
+                    <?php endif; ?>
+                    <?php if ($stockF !== '' && $stockF !== 'All'): ?>
+                        <input type="hidden" name="stock_filter" value="<?php echo htmlspecialchars($stockF); ?>">
                     <?php endif; ?>
                     <select name="cat" class="product-filter-select" onchange="this.form.submit()">
                         <option value="All">All Categories</option>
@@ -530,6 +549,27 @@ $categoryNames = array_values($categoryNames);
                     <?php endif; ?>
                     <?php if ($categoryF !== '' && $categoryF !== 'All'): ?>
                         <input type="hidden" name="cat" value="<?php echo htmlspecialchars($categoryF); ?>">
+                    <?php endif; ?>
+                    <?php if ($addedF !== '' && $addedF !== 'All'): ?>
+                        <input type="hidden" name="added" value="<?php echo htmlspecialchars($addedF); ?>">
+                    <?php endif; ?>
+                    <select name="stock_filter" class="product-filter-select" onchange="this.form.submit()">
+                        <option value="All" <?php echo $stockF === 'All' ? 'selected' : ''; ?>>All Stock Status</option>
+                        <option value="low" <?php echo $stockF === 'low' ? 'selected' : ''; ?>>Low Stock</option>
+                        <option value="expired" <?php echo $stockF === 'expired' ? 'selected' : ''; ?>>Expired Products</option>
+                    </select>
+                </form>
+            </div>
+            <div class="product-filter-card">
+                <form method="get" action="products.php">
+                    <?php if ($search !== ''): ?>
+                        <input type="hidden" name="q" value="<?php echo htmlspecialchars($search); ?>">
+                    <?php endif; ?>
+                    <?php if ($categoryF !== '' && $categoryF !== 'All'): ?>
+                        <input type="hidden" name="cat" value="<?php echo htmlspecialchars($categoryF); ?>">
+                    <?php endif; ?>
+                    <?php if ($stockF !== '' && $stockF !== 'All'): ?>
+                        <input type="hidden" name="stock_filter" value="<?php echo htmlspecialchars($stockF); ?>">
                     <?php endif; ?>
                     <select name="added" class="product-filter-select" onchange="this.form.submit()">
                         <option value="All" <?php echo $addedF === 'All' ? 'selected' : ''; ?>>All Added</option>
@@ -597,7 +637,7 @@ $categoryNames = array_values($categoryNames);
                                 <span class="product-price">RM <?php echo number_format($p['price'], 2); ?></span>
                             </td>
                             <td>
-                                <?php if ($p['stockQuantity'] <= 50): ?>
+                                <?php if ($p['stockQuantity'] <= $lowStockThreshold): ?>
                                     <span class="product-stock-low"><?php echo (int)$p['stockQuantity']; ?></span>
                                 <?php else: ?>
                                     <?php echo (int)$p['stockQuantity']; ?>

@@ -43,6 +43,17 @@ function relativeTime(string $datetime): string
     return date('d M Y', $timestamp);
 }
 
+function productCount(mysqli $conn, string $whereClause): int
+{
+    $result = $conn->query("SELECT COUNT(*) AS total FROM products WHERE {$whereClause}");
+    if (!$result) {
+        return 0;
+    }
+
+    $row = $result->fetch_assoc();
+    return (int) ($row['total'] ?? 0);
+}
+
 $today = new DateTimeImmutable('today');
 $weekStart = $today->modify('monday this week');
 $weekEnd = $weekStart->modify('+6 days');
@@ -73,6 +84,10 @@ $pendingApprovalsResult = $conn->query("SELECT COUNT(*) AS total FROM product_su
 if ($pendingApprovalsResult) {
     $pendingApprovals = (int) (($pendingApprovalsResult->fetch_assoc()['total'] ?? 0));
 }
+
+$lowStockThreshold = 50;
+$lowStockCount = productCount($conn, "status = 'Active' AND stockQuantity <= {$lowStockThreshold}");
+$expiredProductCount = productCount($conn, "expiryDate IS NOT NULL AND expiryDate < CURDATE()");
 
 $weeklySales = [
     'Mon' => 0.0,
@@ -291,51 +306,32 @@ $maxWeeklySales = max($weeklySales ?: [0]);
                     <h2>Alerts</h2>
                 </div>
                 <div class="alerts-list">
-                    <?php
-                    $lowStockResult = $conn->query(
-                        "SELECT productName, stockQuantity
-                         FROM products
-                         WHERE status = 'Active' AND stockQuantity <= 12
-                         ORDER BY stockQuantity ASC
-                         LIMIT 2"
-                    );
-                    $hasAlerts = false;
-                    if ($lowStockResult && $lowStockResult->num_rows > 0):
-                        while ($alert = $lowStockResult->fetch_assoc()):
-                            $hasAlerts = true;
-                    ?>
-                        <div class="alert-pill warning">
-                            <strong>Low stock alert:</strong> <?php echo htmlspecialchars($alert['productName']); ?> (<?php echo (int) $alert['stockQuantity']; ?> units remaining)
+                    <div class="alert-row info">
+                        <div class="alert-icon">&#9745;</div>
+                        <div class="alert-copy">
+                            <strong>Pending approvals</strong>
+                            <span><?php echo number_format($pendingApprovals); ?> product<?php echo $pendingApprovals === 1 ? '' : 's'; ?> waiting for review</span>
                         </div>
-                    <?php
-                        endwhile;
-                    endif;
+                        <div class="alert-count"><?php echo number_format($pendingApprovals); ?></div>
+                    </div>
 
-                    $expiringResult = $conn->query(
-                        "SELECT productName, expiryDate
-                         FROM products
-                         WHERE status = 'Active' AND expiryDate IS NOT NULL AND expiryDate BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY)
-                         ORDER BY expiryDate ASC
-                         LIMIT 1"
-                    );
-                    if ($expiringResult && ($expiring = $expiringResult->fetch_assoc())):
-                        $hasAlerts = true;
-                    ?>
-                        <div class="alert-pill warning">
-                            <strong>Expiring soon:</strong> <?php echo htmlspecialchars($expiring['productName']); ?> (<?php echo date('M d, Y', strtotime($expiring['expiryDate'])); ?>)
+                    <div class="alert-row warning">
+                        <div class="alert-icon">&#9888;</div>
+                        <div class="alert-copy">
+                            <strong>Product low stock</strong>
+                            <span><?php echo number_format($lowStockCount); ?> product<?php echo $lowStockCount === 1 ? '' : 's'; ?> at or below <?php echo number_format($lowStockThreshold); ?> units</span>
                         </div>
-                    <?php endif; ?>
+                        <div class="alert-count"><?php echo number_format($lowStockCount); ?></div>
+                    </div>
 
-                    <?php if ($pendingApprovals > 0): ?>
-                        <?php $hasAlerts = true; ?>
-                        <div class="alert-pill info">
-                            <?php echo number_format($pendingApprovals); ?> products pending compliance verification
+                    <div class="alert-row danger">
+                        <div class="alert-icon">&#8634;</div>
+                        <div class="alert-copy">
+                            <strong>Product has expired</strong>
+                            <span><?php echo number_format($expiredProductCount); ?> product<?php echo $expiredProductCount === 1 ? '' : 's'; ?> past expiry date</span>
                         </div>
-                    <?php endif; ?>
-
-                    <?php if (!$hasAlerts): ?>
-                        <div class="alert-pill info">No urgent alerts right now.</div>
-                    <?php endif; ?>
+                        <div class="alert-count"><?php echo number_format($expiredProductCount); ?></div>
+                    </div>
                 </div>
             </div>
         </section>
